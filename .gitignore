@@ -36,3 +36,4 @@ result.txt
 # *.png
 # *.jpg
 # *.jpeg
+node_modules/
