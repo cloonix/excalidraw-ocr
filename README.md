@@ -164,6 +164,11 @@ python excalidraw_ocr.py drawing.excalidraw.md -o output.txt
 python excalidraw_ocr.py drawing.excalidraw.md -c
 ```
 
+**Force reprocessing (bypass cache):**
+```bash
+python excalidraw_ocr.py drawing.excalidraw.md -f
+```
+
 **Example with real file:**
 ```bash
 python excalidraw_ocr.py "Notes 2025-11-24.excalidraw.md"
@@ -176,6 +181,8 @@ python excalidraw_ocr.py "Notes 2025-11-24.excalidraw.md"
 > - `notes.excalidraw.md` → `notes.md`
 > 
 > Intermediate files (SVG, PNG) are automatically cleaned up after processing.
+> 
+> **Smart Caching:** Results are cached based on content hash. If you run the same file again without changes, it will use the cached result instead of reprocessing. Use `-f` to force reprocessing.
 
 ### How It Works
 

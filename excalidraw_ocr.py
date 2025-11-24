@@ -6,12 +6,14 @@ Requires cairo system libraries - run ./install_cairo.sh first.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 # Import OCR functions from existing script
@@ -24,6 +26,70 @@ try:
     HAS_CAIROSVG = True
 except ImportError:
     HAS_CAIROSVG = False
+
+
+def get_content_hash(compressed_data: str) -> str:
+    """Generate SHA256 hash of Excalidraw content."""
+    return hashlib.sha256(compressed_data.encode()).hexdigest()[:16]
+
+
+def read_output_metadata(output_path: Path) -> dict:
+    """Extract metadata from output file if exists."""
+    if not output_path.exists():
+        return {}
+    
+    try:
+        with open(output_path, 'r', encoding='utf-8') as f:
+            metadata = {}
+            for _ in range(5):  # Check first 5 lines for metadata
+                line = f.readline()
+                if not line.startswith('<!--'):
+                    break
+                if 'excalidraw-ocr-hash:' in line:
+                    metadata['hash'] = line.split(':', 1)[1].strip().rstrip('-->').strip()
+                elif 'excalidraw-ocr-source:' in line:
+                    metadata['source'] = line.split(':', 1)[1].strip().rstrip('-->').strip()
+                elif 'excalidraw-ocr-date:' in line:
+                    metadata['date'] = line.split(':', 1)[1].strip().rstrip('-->').strip()
+            return metadata
+    except Exception:
+        return {}
+
+
+def should_reprocess(output_path: Path, current_hash: str, force: bool = False) -> tuple[bool, str]:
+    """
+    Check if file needs reprocessing.
+    Returns (should_process, reason).
+    """
+    if force:
+        return True, "forced reprocessing"
+    
+    if not output_path.exists():
+        return True, "output file doesn't exist"
+    
+    metadata = read_output_metadata(output_path)
+    
+    if 'hash' not in metadata:
+        return True, "no hash metadata found"
+    
+    if metadata['hash'] != current_hash:
+        return True, "content has changed"
+    
+    return False, f"output is up-to-date (hash: {current_hash})"
+
+
+def save_with_metadata(output_path: Path, text: str, content_hash: str, source_file: str):
+    """Save output with metadata header."""
+    metadata_lines = [
+        f"<!-- excalidraw-ocr-hash: {content_hash} -->",
+        f"<!-- excalidraw-ocr-source: {source_file} -->",
+        f"<!-- excalidraw-ocr-date: {datetime.now().isoformat()} -->",
+        "",  # Empty line before content
+    ]
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(metadata_lines))
+        f.write(text)
 
 
 def extract_compressed_data(excalidraw_file_path: Path) -> str:
@@ -144,9 +210,13 @@ def check_node_dependencies():
 def process_excalidraw_file(
     excalidraw_path: Path,
     output_path: str | None = None,
-    model: str | None = None
-) -> str:
-    """Process an Excalidraw file and extract text via OCR."""
+    model: str | None = None,
+    force: bool = False
+) -> tuple[str, bool, str]:
+    """
+    Process an Excalidraw file and extract text via OCR.
+    Returns (extracted_text, was_processed, content_hash).
+    """
     
     if not excalidraw_path.exists():
         raise FileNotFoundError(f"File not found: {excalidraw_path}")
@@ -154,12 +224,43 @@ def process_excalidraw_file(
     if excalidraw_path.suffix not in ['.md', '.excalidraw']:
         raise ValueError(f"Expected .excalidraw.md or .excalidraw file, got: {excalidraw_path.suffix}")
     
-    print(f"Processing: {excalidraw_path.name}", file=sys.stderr)
-    
     # Extract compressed data
-    print("Extracting Excalidraw data...", file=sys.stderr)
     compressed_data = extract_compressed_data(excalidraw_path)
-    print("✓ Data extracted", file=sys.stderr)
+    
+    # Calculate content hash
+    content_hash = get_content_hash(compressed_data)
+    
+    # Determine output path
+    if output_path:
+        output_file = Path(output_path)
+    else:
+        # Auto-generate output filename by removing .excalidraw from the name
+        filename = excalidraw_path.name
+        if '.excalidraw.' in filename:
+            output_filename = filename.replace('.excalidraw.', '.')
+        elif filename.endswith('.excalidraw'):
+            output_filename = filename.replace('.excalidraw', '.txt')
+        else:
+            output_filename = excalidraw_path.stem + '.txt'
+        output_file = excalidraw_path.parent / output_filename
+    
+    # Check if reprocessing is needed
+    needs_processing, reason = should_reprocess(output_file, content_hash, force)
+    
+    if not needs_processing:
+        print(f"✓ {reason}", file=sys.stderr)
+        # Read and return existing content
+        with open(output_file, 'r', encoding='utf-8') as f:
+            # Skip metadata lines
+            content = []
+            for line in f:
+                if not line.startswith('<!--'):
+                    content.append(line)
+                elif line.startswith('<!--') and not 'excalidraw-ocr' in line:
+                    content.append(line)
+            return ''.join(content).lstrip(), False, content_hash
+    
+    print(f"Processing: {excalidraw_path.name} ({reason})", file=sys.stderr)
     
     # Check Node.js dependencies
     check_node_dependencies()
@@ -196,7 +297,7 @@ def process_excalidraw_file(
             extracted_text = perform_ocr(image_base64, model)
             print("✓ OCR completed\n", file=sys.stderr)
             
-            return extracted_text
+            return extracted_text, True, content_hash
             
         finally:
             # Always clean up temp PNG
@@ -219,10 +320,14 @@ Examples:
   %(prog)s drawing.excalidraw.md -o output.txt      # Save to custom file
   %(prog)s drawing.excalidraw.md -m MODEL           # Use specific OCR model
   %(prog)s drawing.excalidraw.md -c                 # Also copy to clipboard
+  %(prog)s drawing.excalidraw.md -f                 # Force reprocessing
 
 Note: Output is automatically saved to a file with the same name but without
       the .excalidraw part (e.g., "name.excalidraw.md" -> "name.md").
       Intermediate files (SVG, PNG) are automatically cleaned up.
+      
+      Results are cached - if the Excalidraw content hasn't changed, the
+      cached output is used instead of reprocessing. Use -f to force.
 
 Environment Variables:
   OPENROUTER_API_KEY    Your OpenRouter API key (required)
@@ -253,42 +358,45 @@ Requirements:
         action="store_true",
         help="Copy extracted text to clipboard",
     )
+    parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Force reprocessing even if output is up-to-date",
+    )
     
     args = parser.parse_args()
     
     try:
         # Process the file
         excalidraw_path = Path(args.excalidraw_file).resolve()
-        extracted_text = process_excalidraw_file(
+        extracted_text, was_processed, content_hash = process_excalidraw_file(
             excalidraw_path,
             output_path=args.output,
-            model=args.model
+            model=args.model,
+            force=args.force
         )
         
-        # Determine output file path
+        # Determine output file path (same logic as in process_excalidraw_file)
         if args.output:
-            output_path = args.output
+            output_file = Path(args.output)
         else:
             # Auto-generate output filename by removing .excalidraw from the name
-            # Example: "Drawing 2025-11-24.excalidraw.md" -> "Drawing 2025-11-24.md"
             filename = excalidraw_path.name
             if '.excalidraw.' in filename:
-                # Remove .excalidraw part: "name.excalidraw.md" -> "name.md"
                 output_filename = filename.replace('.excalidraw.', '.')
             elif filename.endswith('.excalidraw'):
-                # Handle .excalidraw files without extension
                 output_filename = filename.replace('.excalidraw', '.txt')
             else:
-                # Fallback: just change extension to .txt
                 output_filename = excalidraw_path.stem + '.txt'
-            
-            output_path = str(excalidraw_path.parent / output_filename)
+            output_file = excalidraw_path.parent / output_filename
         
-        # Save results to file
-        if not output_path.endswith('.png'):
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(extracted_text)
-            print(f"✓ Text saved to {output_path}", file=sys.stderr)
+        # Save the result with metadata if it was newly processed
+        if was_processed:
+            save_with_metadata(output_file, extracted_text, content_hash, str(excalidraw_path))
+            print(f"✓ Text saved to {output_file}", file=sys.stderr)
+        # If from cache, file already exists - just confirm it
+        else:
+            print(f"✓ Using cached result: {output_file}", file=sys.stderr)
         
         # Copy to clipboard if requested
         if args.clipboard:
