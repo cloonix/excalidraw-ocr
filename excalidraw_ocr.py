@@ -34,23 +34,39 @@ def get_content_hash(compressed_data: str) -> str:
 
 
 def read_output_metadata(output_path: Path) -> dict:
-    """Extract metadata from output file if exists."""
+    """Extract metadata from YAML frontmatter if exists."""
     if not output_path.exists():
         return {}
     
     try:
         with open(output_path, 'r', encoding='utf-8') as f:
+            first_line = f.readline().strip()
+            
+            # Check if file starts with YAML frontmatter
+            if first_line != '---':
+                return {}
+            
             metadata = {}
-            for _ in range(5):  # Check first 5 lines for metadata
-                line = f.readline()
-                if not line.startswith('<!--'):
+            for line in f:
+                line = line.strip()
+                
+                # End of frontmatter
+                if line == '---':
                     break
-                if 'excalidraw-ocr-hash:' in line:
-                    metadata['hash'] = line.split(':', 1)[1].strip().rstrip('-->').strip()
-                elif 'excalidraw-ocr-source:' in line:
-                    metadata['source'] = line.split(':', 1)[1].strip().rstrip('-->').strip()
-                elif 'excalidraw-ocr-date:' in line:
-                    metadata['date'] = line.split(':', 1)[1].strip().rstrip('-->').strip()
+                
+                # Parse YAML key-value pairs
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    if key == 'excalidraw-ocr-hash':
+                        metadata['hash'] = value
+                    elif key == 'excalidraw-ocr-source':
+                        metadata['source'] = value
+                    elif key == 'excalidraw-ocr-date':
+                        metadata['date'] = value
+            
             return metadata
     except Exception:
         return {}
@@ -78,18 +94,44 @@ def should_reprocess(output_path: Path, current_hash: str, force: bool = False) 
     return False, f"output is up-to-date (hash: {current_hash})"
 
 
+def clean_markdown_wrapper(text: str) -> str:
+    """
+    Remove wrapping markdown code blocks if present.
+    Removes outer ```markdown or ``` blocks, keeps inner code blocks like ```mermaid.
+    """
+    text = text.strip()
+    lines = text.split('\n')
+    
+    if not lines:
+        return text
+    
+    # Remove wrapping ```markdown or ``` from start
+    if lines[0].strip().startswith('```'):
+        lines = lines[1:]
+    
+    # Remove wrapping ``` from end
+    if lines and lines[-1].strip() == '```':
+        lines = lines[:-1]
+    
+    return '\n'.join(lines).strip()
+
+
 def save_with_metadata(output_path: Path, text: str, content_hash: str, source_file: str):
-    """Save output with metadata header."""
-    metadata_lines = [
-        f"<!-- excalidraw-ocr-hash: {content_hash} -->",
-        f"<!-- excalidraw-ocr-source: {source_file} -->",
-        f"<!-- excalidraw-ocr-date: {datetime.now().isoformat()} -->",
-        "",  # Empty line before content
+    """Save output with YAML frontmatter metadata."""
+    # Create YAML frontmatter
+    frontmatter = [
+        "---",
+        f"excalidraw-ocr-hash: {content_hash}",
+        f"excalidraw-ocr-source: {source_file}",
+        f"excalidraw-ocr-date: {datetime.now().isoformat()}",
+        "---",
+        "",  # Empty line after frontmatter
     ]
     
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(metadata_lines))
-        f.write(text)
+        f.write('\n'.join(frontmatter))
+        f.write(text.strip())  # Strip to avoid extra whitespace
+        f.write('\n')  # End with newline
 
 
 def extract_compressed_data(excalidraw_file_path: Path) -> str:
@@ -250,16 +292,29 @@ def process_excalidraw_file(
     
     if not needs_processing:
         print(f"✓ {reason}", file=sys.stderr)
-        # Read and return existing content
+        # Read and return existing content (skip YAML frontmatter)
         with open(output_file, 'r', encoding='utf-8') as f:
-            # Skip metadata lines
             content = []
+            in_frontmatter = False
+            first_line = True
+            
             for line in f:
-                if not line.startswith('<!--'):
-                    content.append(line)
-                elif line.startswith('<!--') and not 'excalidraw-ocr' in line:
-                    content.append(line)
-            return ''.join(content).lstrip(), False, content_hash
+                # Check if file starts with frontmatter
+                if first_line:
+                    first_line = False
+                    if line.strip() == '---':
+                        in_frontmatter = True
+                        continue
+                
+                # Skip until end of frontmatter
+                if in_frontmatter:
+                    if line.strip() == '---':
+                        in_frontmatter = False
+                    continue
+                
+                content.append(line)
+            
+            return ''.join(content).strip(), False, content_hash
     
     print(f"Processing: {excalidraw_path.name} ({reason})", file=sys.stderr)
     
@@ -297,6 +352,9 @@ def process_excalidraw_file(
             print(f"Performing OCR with {model or 'default model'}...", file=sys.stderr)
             extracted_text = perform_ocr(image_base64, model)
             print("✓ OCR completed\n", file=sys.stderr)
+            
+            # Clean any markdown wrapper that AI might have added
+            extracted_text = clean_markdown_wrapper(extracted_text)
             
             return extracted_text, True, content_hash
             
