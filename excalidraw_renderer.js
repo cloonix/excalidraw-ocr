@@ -6,6 +6,7 @@
 
 const { decompressFromBase64 } = require('lz-string');
 const fs = require('fs');
+const path = require('path');
 
 function parseArgs() {
     const args = process.argv.slice(2);
@@ -161,6 +162,38 @@ function createSVGFromExcalidraw(excalidrawData) {
     };
 }
 
+function validateOutputPath(outputPath) {
+    /**
+     * Validate output path to prevent path traversal attacks.
+     * @param {string} outputPath - The output path to validate
+     * @returns {string} Resolved safe path
+     * @throws {Error} If path is unsafe
+     */
+    // Resolve to absolute path
+    const resolved = path.resolve(outputPath);
+    const cwd = process.cwd();
+    
+    // Check for suspicious patterns
+    if (outputPath.includes('..')) {
+        throw new Error('Path traversal detected in output path');
+    }
+    
+    // Ensure it's within current working directory or /tmp
+    if (!resolved.startsWith(cwd) && !resolved.startsWith('/tmp')) {
+        throw new Error(`Output path must be within working directory: ${outputPath}`);
+    }
+    
+    // Block sensitive directories
+    const sensitiveDirs = ['/etc/', '/usr/', '/bin/', '/sbin/', '/boot/', '/sys/', '/proc/'];
+    for (const sensitive of sensitiveDirs) {
+        if (resolved.startsWith(sensitive)) {
+            throw new Error(`Writing to ${sensitive} is not allowed`);
+        }
+    }
+    
+    return resolved;
+}
+
 function escapeXml(unsafe) {
     return unsafe.replace(/[<>&'"]/g, (c) => {
         switch (c) {
@@ -194,6 +227,9 @@ async function main() {
     try {
         const { outputPath } = parseArgs();
         
+        // Validate output path for security
+        const safeOutputPath = validateOutputPath(outputPath);
+        
         // Read compressed data from stdin
         const compressedData = await readStdin();
         
@@ -215,11 +251,33 @@ async function main() {
         // Decompress the data
         const excalidrawData = decompressExcalidraw(compressedData);
         
+        // Validate decompressed size
+        const jsonSize = JSON.stringify(excalidrawData).length;
+        const MAX_DECOMPRESSED_SIZE = 50 * 1024 * 1024; // 50MB
+        if (jsonSize > MAX_DECOMPRESSED_SIZE) {
+            throw new Error(`Decompressed data too large: ${(jsonSize / 1024 / 1024).toFixed(2)}MB (max: 50MB)`);
+        }
+        
+        // Validate structure
+        if (!excalidrawData || typeof excalidrawData !== 'object') {
+            throw new Error('Invalid Excalidraw data structure');
+        }
+        
+        if (!Array.isArray(excalidrawData.elements)) {
+            throw new Error('Excalidraw data missing elements array');
+        }
+        
+        // Limit number of elements to prevent DoS
+        const MAX_ELEMENTS = 10000;
+        if (excalidrawData.elements.length > MAX_ELEMENTS) {
+            throw new Error(`Too many elements: ${excalidrawData.elements.length} (max: ${MAX_ELEMENTS})`);
+        }
+        
         // Create SVG from Excalidraw data
         const { svg, width, height, elementCount } = createSVGFromExcalidraw(excalidrawData);
         
         // Save SVG to file
-        fs.writeFileSync(outputPath, svg);
+        fs.writeFileSync(safeOutputPath, svg);
         
         // Output success info as JSON
         console.log(JSON.stringify({
@@ -227,7 +285,7 @@ async function main() {
             width,
             height,
             elementCount,
-            outputPath
+            outputPath: safeOutputPath
         }));
         
     } catch (error) {

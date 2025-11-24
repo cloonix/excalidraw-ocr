@@ -20,7 +20,10 @@ from ocr_lib import (
     perform_ocr, 
     copy_to_clipboard,
     temp_file,
-    get_excalidraw_output_path
+    get_excalidraw_output_path,
+    validate_output_path,
+    MAX_EXCALIDRAW_SIZE_MB,
+    logger
 )
 from PIL import Image
 
@@ -127,6 +130,10 @@ def clean_markdown_wrapper(text: str) -> str:
 
 def save_with_metadata(output_path: Path, text: str, content_hash: str, source_file: str):
     """Save output with YAML frontmatter metadata."""
+    # Validate output path for security
+    safe_path = validate_output_path(output_path)
+    logger.info(f"Saving output to: {safe_path.name}")
+    
     # Create YAML frontmatter (only hash is needed for caching)
     frontmatter = [
         "---",
@@ -135,15 +142,28 @@ def save_with_metadata(output_path: Path, text: str, content_hash: str, source_f
         "",  # Empty line after frontmatter
     ]
     
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(safe_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(frontmatter))
         f.write(text.strip())  # Strip to avoid extra whitespace
         f.write('\n')  # End with newline
 
 
 def extract_compressed_data(excalidraw_file_path: Path) -> str:
-    """Extract compressed JSON data from Excalidraw markdown file."""
+    """Extract compressed JSON data from Excalidraw markdown file with size validation."""
     try:
+        # Check file size first
+        file_size = excalidraw_file_path.stat().st_size
+        max_size_bytes = MAX_EXCALIDRAW_SIZE_MB * 1024 * 1024
+        
+        if file_size > max_size_bytes:
+            logger.warning(f"Excalidraw file too large: {file_size / 1024 / 1024:.2f}MB")
+            raise ValueError(
+                f"Excalidraw file too large: {file_size / 1024 / 1024:.2f}MB "
+                f"(max: {MAX_EXCALIDRAW_SIZE_MB}MB)"
+            )
+        
+        logger.info(f"Reading Excalidraw file: {excalidraw_file_path.name} ({file_size / 1024:.2f}KB)")
+        
         with open(excalidraw_file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
@@ -195,10 +215,14 @@ def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict
     if not renderer_script.exists():
         raise FileNotFoundError(f"Renderer script not found: {renderer_script}")
     
+    # Validate SVG output path for security
+    safe_svg_path = validate_output_path(output_svg_path)
+    logger.info(f"Rendering Excalidraw to SVG: {safe_svg_path.name}")
+    
     try:
         # Call Node.js renderer, passing data via stdin
         result = subprocess.run(
-            ['node', str(renderer_script), output_svg_path],
+            ['node', str(renderer_script), str(safe_svg_path)],
             input=compressed_data,
             capture_output=True,
             text=True,
@@ -522,8 +546,17 @@ Requirements:
         
         return 0 if error_count == 0 else 1
     
-    except Exception as e:
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {str(e)}")
+        print(f"Error: File not found", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
         print(f"Error: {str(e)}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        logger.exception("Unexpected error occurred")
+        print(f"Error: An unexpected error occurred. Check logs for details.", file=sys.stderr)
         return 1
 
 

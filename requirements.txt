@@ -1,15 +1,18 @@
 # Image processing
-Pillow>=10.0.0
+Pillow==10.4.0
 
 # SVG to PNG conversion (requires system cairo library)
 # Install system deps first: ./install_cairo.sh
-cairosvg>=2.7.0
+cairosvg==2.7.1
 
 # Clipboard support
-pyperclip>=1.8.2
+pyperclip==1.11.0
 
 # HTTP requests
-requests>=2.31.0
+requests==2.32.5
+
+# Security: Explicit urllib3 version for requests
+urllib3==2.5.0
 
 # Environment variable management
-python-dotenv>=1.0.0
+python-dotenv==1.2.1

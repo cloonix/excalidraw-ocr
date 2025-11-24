@@ -5,10 +5,13 @@ Provides image encoding, OCR API calls, and output handling.
 """
 
 import base64
+import logging
 import os
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
+from functools import wraps
 from io import BytesIO
 from pathlib import Path
 
@@ -28,6 +31,104 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Image processing constants
 IMAGE_ENCODE_QUALITY = 95  # High quality for OCR accuracy
 API_TIMEOUT_SECONDS = 60   # Generous timeout for vision models
+
+# Security constants
+MAX_IMAGE_SIZE_MB = 20  # Maximum image file size
+MAX_IMAGE_DIMENSION = 8000  # Maximum image dimension in pixels
+MAX_EXCALIDRAW_SIZE_MB = 10  # Maximum Excalidraw file size
+
+# Setup logging
+def setup_logging(log_level=logging.INFO):
+    """Configure logging for security events and debugging."""
+    log_dir = Path.home() / '.ocr' / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_dir / 'ocr.log'),
+            logging.StreamHandler(sys.stderr) if os.getenv('DEBUG') else logging.NullHandler()
+        ]
+    )
+
+logger = logging.getLogger(__name__)
+setup_logging()
+
+
+def validate_output_path(output_path: str | Path, allow_absolute: bool = True) -> Path:
+    """
+    Validate output path to prevent path traversal attacks.
+    
+    Args:
+        output_path: Path to validate
+        allow_absolute: Whether to allow absolute paths outside CWD
+    
+    Returns:
+        Validated Path object
+        
+    Raises:
+        ValueError: If path is unsafe
+    """
+    path = Path(output_path)
+    
+    # Check for path traversal attempts
+    if '..' in str(path):
+        logger.warning(f"Path traversal attempt detected: {output_path}")
+        raise ValueError("Path traversal detected: '..' not allowed in paths")
+    
+    # Resolve to absolute path
+    resolved = path.resolve()
+    
+    # If not allowing absolute paths, ensure it's relative to CWD
+    if not allow_absolute:
+        cwd = Path.cwd().resolve()
+        try:
+            resolved.relative_to(cwd)
+        except ValueError:
+            logger.warning(f"Path outside CWD rejected: {resolved}")
+            raise ValueError(f"Path {resolved} is outside current directory {cwd}")
+    
+    # Block sensitive system directories
+    sensitive_dirs = ['/etc', '/usr', '/bin', '/sbin', '/boot', '/sys', '/proc']
+    for sensitive in sensitive_dirs:
+        if str(resolved).startswith(sensitive):
+            logger.error(f"Attempt to write to sensitive directory: {resolved}")
+            raise ValueError(f"Writing to {sensitive} is not allowed")
+    
+    return resolved
+
+
+def rate_limit(max_calls: int = 10, period: int = 60):
+    """
+    Rate limit decorator for API calls.
+    
+    Args:
+        max_calls: Maximum number of calls allowed
+        period: Time period in seconds
+    """
+    calls = []
+    
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            now = time.time()
+            # Remove old calls
+            calls[:] = [c for c in calls if c > now - period]
+            
+            if len(calls) >= max_calls:
+                sleep_time = period - (now - calls[0])
+                if sleep_time > 0:
+                    logger.info(f"Rate limit reached. Waiting {sleep_time:.1f}s...")
+                    print(f"Rate limit reached. Waiting {sleep_time:.1f}s...", 
+                          file=sys.stderr)
+                    time.sleep(sleep_time)
+                    calls.clear()
+            
+            calls.append(time.time())
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def encode_image_to_base64(image: Image.Image) -> str:
@@ -57,6 +158,7 @@ def encode_image_to_base64(image: Image.Image) -> str:
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 
+@rate_limit(max_calls=10, period=60)  # 10 requests per minute
 def perform_ocr(image_base64: str, model: str | None = None) -> str:
     """
     Send image to OpenRouter API for OCR using vision models.
@@ -73,12 +175,14 @@ def perform_ocr(image_base64: str, model: str | None = None) -> str:
         Exception: If API request fails or returns an error
     """
     if not OPENROUTER_API_KEY:
+        logger.error("OPENROUTER_API_KEY not set")
         raise ValueError(
             "OPENROUTER_API_KEY not found. "
             "Please set it in your .env file or environment variables."
         )
     
     model = model or OPENROUTER_MODEL
+    logger.info(f"Performing OCR with model: {model}")
     
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -111,22 +215,45 @@ def perform_ocr(image_base64: str, model: str | None = None) -> str:
     }
     
     try:
-        response = requests.post(
+        # Create session with retries
+        session = requests.Session()
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        
+        retries = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["POST"]
+        )
+        
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        
+        response = session.post(
             OPENROUTER_API_URL, 
             headers=headers, 
             json=payload, 
-            timeout=API_TIMEOUT_SECONDS
+            timeout=API_TIMEOUT_SECONDS,
+            verify=True  # Explicit HTTPS verification
         )
         response.raise_for_status()
         
         data = response.json()
         
         if "error" in data:
+            logger.error(f"API error: {data['error']}")
             raise Exception(f"OpenRouter API error: {data['error']}")
         
+        logger.info("OCR completed successfully")
         return data["choices"][0]["message"]["content"].strip()
     
+    except requests.exceptions.Timeout:
+        logger.error("API request timed out")
+        raise Exception("API request timed out after 60 seconds")
     except requests.exceptions.RequestException as e:
+        logger.error(f"API request failed: {str(e)}")
         raise Exception(f"API request failed: {str(e)}")
 
 
@@ -159,7 +286,11 @@ def save_output(text: str, output_path: str | None = None, to_clipboard: bool = 
         Prints status messages to stderr, actual text to stdout if not saving to file.
     """
     if output_path:
-        with open(output_path, "w", encoding="utf-8") as f:
+        # Validate output path for security
+        safe_path = validate_output_path(output_path)
+        logger.info(f"Saving output to: {safe_path.name}")
+        
+        with open(safe_path, "w", encoding="utf-8") as f:
             f.write(text)
         print(f"✓ Text saved to {output_path}", file=sys.stderr)
     else:
@@ -171,18 +302,20 @@ def save_output(text: str, output_path: str | None = None, to_clipboard: bool = 
 
 
 @contextmanager
-def temp_file(suffix: str = ""):
+def temp_file(suffix: str = "", secure: bool = True):
     """
-    Context manager for temporary files with automatic cleanup.
+    Context manager for temporary files with automatic cleanup and secure permissions.
     
     Args:
         suffix: File suffix/extension (e.g., '.svg', '.png')
+        secure: Whether to use secure file creation (restrictive permissions)
     
     Yields:
         Path to temporary file
     
     Note:
         File is automatically deleted when context exits, even if exception occurs.
+        Secure mode creates files with 0o600 permissions (owner read/write only).
     
     Example:
         with temp_file('.png') as png_path:
@@ -190,14 +323,35 @@ def temp_file(suffix: str = ""):
             pass
         # File automatically cleaned up
     """
-    temp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    path = temp.name
-    temp.close()
+    if secure:
+        # Create with mode 0o600 (owner read/write only)
+        fd, path = tempfile.mkstemp(suffix=suffix)
+        os.close(fd)
+        os.chmod(path, 0o600)
+    else:
+        temp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        path = temp.name
+        temp.close()
+    
     try:
         yield path
     finally:
-        if os.path.exists(path):
-            os.unlink(path)
+        try:
+            if os.path.exists(path):
+                # Securely wipe file before deletion for sensitive data (< 100MB)
+                if secure and os.path.getsize(path) < 100 * 1024 * 1024:
+                    try:
+                        with open(path, 'r+b') as f:
+                            size = os.path.getsize(path)
+                            if size > 0:
+                                f.write(b'\x00' * size)
+                                f.flush()
+                                os.fsync(f.fileno())
+                    except Exception:
+                        pass  # Best effort wipe
+                os.unlink(path)
+        except OSError:
+            pass  # Best effort cleanup
 
 
 def get_excalidraw_output_path(input_path: Path, output_arg: str | None) -> Path:

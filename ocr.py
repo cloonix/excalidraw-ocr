@@ -6,6 +6,7 @@ Supports both image files and clipboard input.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -17,7 +18,10 @@ from ocr_lib import (
     perform_ocr, 
     save_output, 
     copy_to_clipboard,
-    OPENROUTER_MODEL
+    OPENROUTER_MODEL,
+    MAX_IMAGE_SIZE_MB,
+    MAX_IMAGE_DIMENSION,
+    logger
 )
 
 # Supported image formats
@@ -26,7 +30,7 @@ SUPPORTED_FORMATS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 def load_image_from_file(file_path: str) -> Image.Image:
     """
-    Load image from file path.
+    Load image from file path with security validation.
     
     Args:
         file_path: Path to image file
@@ -36,17 +40,49 @@ def load_image_from_file(file_path: str) -> Image.Image:
     
     Raises:
         FileNotFoundError: If image file doesn't exist
-        ValueError: If image format is not supported
+        ValueError: If image format is not supported or file is too large
     """
     path = Path(file_path)
     
     if not path.exists():
         raise FileNotFoundError(f"Image file not found: {file_path}")
     
+    # Check file size before loading
+    file_size = path.stat().st_size
+    max_size_bytes = MAX_IMAGE_SIZE_MB * 1024 * 1024
+    
+    if file_size > max_size_bytes:
+        logger.warning(f"Image file too large: {file_size / 1024 / 1024:.2f}MB")
+        raise ValueError(
+            f"Image file too large: {file_size / 1024 / 1024:.2f}MB "
+            f"(max: {MAX_IMAGE_SIZE_MB}MB)"
+        )
+    
     if path.suffix.lower() not in SUPPORTED_FORMATS:
         raise ValueError(f"Unsupported image format. Supported: {', '.join(SUPPORTED_FORMATS)}")
     
-    return Image.open(path)
+    # Load image
+    logger.info(f"Loading image: {path.name} ({file_size / 1024:.2f}KB)")
+    image = Image.open(path)
+    
+    # Validate image dimensions
+    if image.width > MAX_IMAGE_DIMENSION or image.height > MAX_IMAGE_DIMENSION:
+        logger.warning(f"Image dimensions too large: {image.width}x{image.height}")
+        raise ValueError(
+            f"Image dimensions too large: {image.width}x{image.height} "
+            f"(max: {MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION})"
+        )
+    
+    # Verify it's actually an image (not just extension spoofing)
+    try:
+        image.verify()
+        # Reopen after verify (verify() closes the file)
+        image = Image.open(path)
+    except Exception as e:
+        logger.error(f"Image verification failed: {str(e)}")
+        raise ValueError(f"File is not a valid image: {str(e)}")
+    
+    return image
 
 
 def load_image_from_clipboard() -> Image.Image:
@@ -169,8 +205,17 @@ Environment Variables:
         
         return 0
     
-    except Exception as e:
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {str(e)}")
+        print(f"Error: File not found", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
         print(f"Error: {str(e)}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        logger.exception("Unexpected error occurred")
+        print(f"Error: An unexpected error occurred. Check logs for details.", file=sys.stderr)
         return 1
 
 
