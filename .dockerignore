@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment - never include in image
+.env
+*.env
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Output files - don't copy to image
+*.png
+*.jpg
+*.jpeg
+*.svg
+output/
+input/
+*.txt
+!requirements.txt
+
+# Test files
+test/
+tests/
+*.test.js
+*.spec.py
+
+# Documentation (selectively include)
+*.md
+!README.md
+!SECURITY.md
+
+# Docker files themselves
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/

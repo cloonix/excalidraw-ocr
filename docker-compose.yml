@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  ocr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ocr-app:latest
+    container_name: ocr-container
+    
+    # Mount volumes for input/output
+    volumes:
+      # Mount input directory (read-only for security)
+      - ./input:/input:ro
+      # Mount output directory
+      - ./output:/output
+      # Mount .env file securely (read-only)
+      - ./.env:/app/.env:ro
+      # Persist logs
+      - ocr-logs:/home/ocruser/.ocr/logs
+    
+    # Set environment variables (alternative to .env file)
+    # Can be overridden with .env file in project root
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-flash-1.5}
+      - DEBUG=${DEBUG:-}
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # Need write access for temp files
+    tmpfs:
+      # Temporary filesystem for secure temp file handling
+      - /tmp:size=1G,mode=1777
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # User (non-root)
+    user: "1000:1000"
+    
+    # Network mode (no exposed ports needed)
+    network_mode: bridge
+    
+    # Restart policy
+    restart: "no"
+    
+    # Command (can be overridden)
+    # Default: show help message
+    command: ["python", "ocr.py", "--help"]
+    
+    # Enable stdin/tty for interactive use
+    stdin_open: true
+    tty: true
+
+volumes:
+  ocr-logs:
+    driver: local

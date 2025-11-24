@@ -1,5 +1,8 @@
 *.png
 *.md
+# Exception: Allow Docker and security documentation
+!README-Docker.md
+!SECURITY.md
 
 # Environment variables
 .env
@@ -31,6 +34,10 @@ output.txt
 result.txt
 *.txt
 !requirements.txt
+
+# Docker volumes and generated files
+input/
+output/
 
 # Test images (optional - uncomment if you don't want to commit test images)
 # *.png
