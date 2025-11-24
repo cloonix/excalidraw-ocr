@@ -201,6 +201,17 @@ async function main() {
             throw new Error('No data received from stdin');
         }
         
+        // Validate input size (10MB limit)
+        const MAX_INPUT_SIZE = 10 * 1024 * 1024; // 10MB
+        if (compressedData.length > MAX_INPUT_SIZE) {
+            throw new Error(`Input data too large (${(compressedData.length / 1024 / 1024).toFixed(2)}MB > 10MB)`);
+        }
+        
+        // Validate base64 format
+        if (!/^[A-Za-z0-9+/=\s]+$/.test(compressedData)) {
+            throw new Error('Invalid compressed data format (expected base64)');
+        }
+        
         // Decompress the data
         const excalidrawData = decompressExcalidraw(compressedData);
         

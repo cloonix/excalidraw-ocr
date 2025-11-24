@@ -6,45 +6,38 @@ Supports both image files and clipboard input.
 """
 
 import argparse
-import base64
-import os
 import sys
-from io import BytesIO
 from pathlib import Path
 
-import pyperclip
-import requests
-from dotenv import load_dotenv
 from PIL import Image, ImageGrab
 
-# Load environment variables
-load_dotenv()
-
-# Configuration
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-flash-1.5")
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+# Import shared OCR library functions
+from ocr_lib import (
+    encode_image_to_base64, 
+    perform_ocr, 
+    save_output, 
+    copy_to_clipboard,
+    OPENROUTER_MODEL
+)
 
 # Supported image formats
 SUPPORTED_FORMATS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 
-def encode_image_to_base64(image: Image.Image) -> str:
-    """Convert PIL Image to base64 string."""
-    buffered = BytesIO()
-    # Convert to RGB if necessary (for PNG with transparency, etc.)
-    if image.mode in ("RGBA", "LA", "P"):
-        background = Image.new("RGB", image.size, (255, 255, 255))
-        if image.mode == "P":
-            image = image.convert("RGBA")
-        background.paste(image, mask=image.split()[-1] if image.mode in ("RGBA", "LA") else None)
-        image = background
-    image.save(buffered, format="JPEG", quality=95)
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-
 def load_image_from_file(file_path: str) -> Image.Image:
-    """Load image from file path."""
+    """
+    Load image from file path.
+    
+    Args:
+        file_path: Path to image file
+    
+    Returns:
+        PIL Image object
+    
+    Raises:
+        FileNotFoundError: If image file doesn't exist
+        ValueError: If image format is not supported
+    """
     path = Path(file_path)
     
     if not path.exists():
@@ -57,7 +50,15 @@ def load_image_from_file(file_path: str) -> Image.Image:
 
 
 def load_image_from_clipboard() -> Image.Image:
-    """Load image from clipboard with validation."""
+    """
+    Load image from clipboard with validation.
+    
+    Returns:
+        PIL Image object from clipboard
+    
+    Raises:
+        ValueError: If no image found in clipboard or clipboard content is not an image
+    """
     image = ImageGrab.grabclipboard()
     
     if image is None:
@@ -73,78 +74,6 @@ def load_image_from_clipboard() -> Image.Image:
         )
     
     return image
-
-
-def copy_to_clipboard(text: str) -> None:
-    """Copy text to clipboard."""
-    try:
-        pyperclip.copy(text)
-    except Exception as e:
-        raise Exception(f"Failed to copy to clipboard: {str(e)}")
-
-
-def perform_ocr(image_base64: str, model: str | None = None) -> str:
-    """
-    Send image to OpenRouter API for OCR.
-    
-    Args:
-        image_base64: Base64 encoded image string
-        model: OpenRouter model to use (optional, uses env var default)
-    
-    Returns:
-        Extracted text from the image
-    """
-    if not OPENROUTER_API_KEY:
-        raise ValueError(
-            "OPENROUTER_API_KEY not found. "
-            "Please set it in your .env file or environment variables."
-        )
-    
-    model = model or OPENROUTER_MODEL
-    
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "Please extract all text from this image. "
-                            "If it contains handwriting, transcribe it as accurately as possible. "
-                            "Return only the extracted text, without any additional commentary."
-                        ),
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        },
-                    },
-                ],
-            }
-        ],
-    }
-    
-    try:
-        response = requests.post(OPENROUTER_API_URL, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        if "error" in data:
-            raise Exception(f"OpenRouter API error: {data['error']}")
-        
-        return data["choices"][0]["message"]["content"].strip()
-    
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"API request failed: {str(e)}")
 
 
 def main():
@@ -235,19 +164,8 @@ Environment Variables:
         print("✓ OCR completed\n", file=sys.stderr)
         
         # Output results
-        if args.output:
-            # Save to file
-            with open(args.output, "w", encoding="utf-8") as f:
-                f.write(extracted_text)
-            print(f"✓ Text saved to {args.output}", file=sys.stderr)
-        else:
-            # Print to stdout
-            print(extracted_text)
-        
-        # Copy to clipboard if using clipboard mode (unless disabled or saving to file)
-        if args.clipboard and not args.output and not args.no_clipboard_copy:
-            copy_to_clipboard(extracted_text)
-            print("✓ Text copied to clipboard", file=sys.stderr)
+        to_clipboard = args.clipboard and not args.output and not args.no_clipboard_copy
+        save_output(extracted_text, args.output, to_clipboard)
         
         return 0
     

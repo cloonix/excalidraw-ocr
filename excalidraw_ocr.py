@@ -12,12 +12,22 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-# Import OCR functions from existing script
-from ocr import encode_image_to_base64, perform_ocr, copy_to_clipboard
+# Import OCR functions from shared library
+from ocr_lib import (
+    encode_image_to_base64, 
+    perform_ocr, 
+    copy_to_clipboard,
+    temp_file,
+    get_excalidraw_output_path
+)
 from PIL import Image
+
+# Configuration constants
+SVG_RENDER_SCALE = 2  # 2x scale for better OCR accuracy
+NODE_RENDER_TIMEOUT = 30  # Seconds
+NPM_INSTALL_TIMEOUT = 120  # Seconds
 
 # Try to import cairosvg
 try:
@@ -142,7 +152,15 @@ def extract_compressed_data(excalidraw_file_path: Path) -> str:
         match = re.search(pattern, content)
         
         if not match:
-            raise ValueError("No compressed-json block found in file")
+            # Try to give helpful error message
+            if '```json' in content:
+                raise ValueError(
+                    "Found ```json block but expected ```compressed-json. "
+                    "Is this an Excalidraw file?"
+                )
+            raise ValueError(
+                "No compressed-json block found. Not a valid Excalidraw file?"
+            )
         
         # Extract and clean the compressed data
         compressed_data = match.group(1)
@@ -157,7 +175,20 @@ def extract_compressed_data(excalidraw_file_path: Path) -> str:
 
 
 def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict:
-    """Call Node.js script to render Excalidraw to SVG."""
+    """
+    Call Node.js script to render Excalidraw to SVG.
+    
+    Args:
+        compressed_data: Base64-compressed Excalidraw JSON data
+        output_svg_path: Path where SVG file should be written
+    
+    Returns:
+        Dict with render info (width, height, elementCount, success, outputPath)
+    
+    Raises:
+        FileNotFoundError: If renderer script or Node.js not found
+        Exception: If rendering fails or times out
+    """
     script_dir = Path(__file__).parent
     renderer_script = script_dir / "excalidraw_renderer.js"
     
@@ -171,7 +202,7 @@ def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict
             input=compressed_data,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=NODE_RENDER_TIMEOUT
         )
         
         if result.returncode != 0:
@@ -187,7 +218,7 @@ def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict
         return output_data
         
     except subprocess.TimeoutExpired:
-        raise Exception("Rendering timed out after 30 seconds")
+        raise Exception(f"Rendering timed out after {NODE_RENDER_TIMEOUT} seconds")
     except FileNotFoundError:
         raise Exception(
             "Node.js not found. Please ensure Node.js is installed.\n"
@@ -198,7 +229,16 @@ def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict
 
 
 def svg_to_png(svg_path: str, png_path: str):
-    """Convert SVG to PNG using cairosvg."""
+    """
+    Convert SVG to PNG using cairosvg at 2x scale for OCR quality.
+    
+    Args:
+        svg_path: Path to input SVG file
+        png_path: Path where PNG should be written
+    
+    Raises:
+        Exception: If cairosvg not installed or conversion fails
+    """
     if not HAS_CAIROSVG:
         script_dir = Path(__file__).parent
         install_script = script_dir / "install_cairo.sh"
@@ -213,14 +253,19 @@ def svg_to_png(svg_path: str, png_path: str):
         )
     
     try:
-        # Convert SVG to PNG with 2x scale for better OCR quality
-        cairosvg.svg2png(url=svg_path, write_to=png_path, scale=2.0)
+        # Convert SVG to PNG with scale for better OCR quality
+        cairosvg.svg2png(url=svg_path, write_to=png_path, scale=SVG_RENDER_SCALE)
     except Exception as e:
         raise Exception(f"Failed to convert SVG to PNG: {str(e)}")
 
 
 def check_node_dependencies():
-    """Check if required Node.js dependencies are installed."""
+    """
+    Check if required Node.js dependencies are installed, install if missing.
+    
+    Raises:
+        Exception: If npm not found or installation fails
+    """
     script_dir = Path(__file__).parent
     node_modules = script_dir / "node_modules"
     
@@ -232,7 +277,7 @@ def check_node_dependencies():
                 cwd=script_dir,
                 capture_output=True,
                 check=True,
-                timeout=120
+                timeout=NPM_INSTALL_TIMEOUT
             )
             print("✓ Node.js dependencies installed", file=sys.stderr)
         except subprocess.CalledProcessError as e:
@@ -270,19 +315,8 @@ def process_excalidraw_file(
     # Calculate content hash
     content_hash = get_content_hash(compressed_data)
     
-    # Determine output path
-    if output_path:
-        output_file = Path(output_path)
-    else:
-        # Auto-generate output filename by removing .excalidraw from the name
-        filename = excalidraw_path.name
-        if '.excalidraw.' in filename:
-            output_filename = filename.replace('.excalidraw.', '.')
-        elif filename.endswith('.excalidraw'):
-            output_filename = filename.replace('.excalidraw', '.txt')
-        else:
-            output_filename = excalidraw_path.stem + '.txt'
-        output_file = excalidraw_path.parent / output_filename
+    # Determine output path using helper
+    output_file = get_excalidraw_output_path(excalidraw_path, output_path)
     
     # Check if reprocessing is needed
     needs_processing, reason = should_reprocess(output_file, content_hash, force)
@@ -318,52 +352,34 @@ def process_excalidraw_file(
     # Check Node.js dependencies
     check_node_dependencies()
     
-    # Render to SVG first
+    # Use context managers for automatic temp file cleanup
     print("Rendering to SVG...", file=sys.stderr)
-    temp_svg = tempfile.NamedTemporaryFile(suffix='.svg', delete=False)
-    svg_path = temp_svg.name
-    temp_svg.close()
-    
-    try:
+    with temp_file('.svg') as svg_path, temp_file('.png') as png_path:
+        # Render to SVG
         render_info = render_excalidraw_to_svg(compressed_data, svg_path)
         print(f"✓ SVG rendered: {render_info['width']:.0f}x{render_info['height']:.0f} px, "
               f"{render_info['elementCount']} elements", file=sys.stderr)
         
-        # Convert SVG to PNG (always use temp file)
+        # Convert SVG to PNG
         print("Converting to PNG...", file=sys.stderr)
-        temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-        png_path = temp_file.name
-        temp_file.close()
+        svg_to_png(svg_path, png_path)
+        print("✓ PNG created", file=sys.stderr)
         
-        try:
-            svg_to_png(svg_path, png_path)
-            print("✓ PNG created", file=sys.stderr)
-            
-            # Load image and encode for OCR
-            print("Encoding image...", file=sys.stderr)
-            image = Image.open(png_path)
-            image_base64 = encode_image_to_base64(image)
-            print("✓ Image encoded", file=sys.stderr)
-            
-            # Perform OCR
-            print(f"Performing OCR with {model or 'default model'}...", file=sys.stderr)
-            extracted_text = perform_ocr(image_base64, model)
-            print("✓ OCR completed\n", file=sys.stderr)
-            
-            # Clean any markdown wrapper that AI might have added
-            extracted_text = clean_markdown_wrapper(extracted_text)
-            
-            return extracted_text, True, content_hash
-            
-        finally:
-            # Always clean up temp PNG
-            if os.path.exists(png_path):
-                os.unlink(png_path)
-                
-    finally:
-        # Clean up temp SVG
-        if os.path.exists(svg_path):
-            os.unlink(svg_path)
+        # Load image and encode for OCR
+        print("Encoding image...", file=sys.stderr)
+        image = Image.open(png_path)
+        image_base64 = encode_image_to_base64(image)
+        print("✓ Image encoded", file=sys.stderr)
+        
+        # Perform OCR
+        print(f"Performing OCR with {model or 'default model'}...", file=sys.stderr)
+        extracted_text = perform_ocr(image_base64, model)
+        print("✓ OCR completed\n", file=sys.stderr)
+        
+        # Clean any markdown wrapper that AI might have added
+        extracted_text = clean_markdown_wrapper(extracted_text)
+        
+        return extracted_text, True, content_hash
 
 
 def main():
@@ -432,19 +448,8 @@ Requirements:
             force=args.force
         )
         
-        # Determine output file path (same logic as in process_excalidraw_file)
-        if args.output:
-            output_file = Path(args.output)
-        else:
-            # Auto-generate output filename by removing .excalidraw from the name
-            filename = excalidraw_path.name
-            if '.excalidraw.' in filename:
-                output_filename = filename.replace('.excalidraw.', '.')
-            elif filename.endswith('.excalidraw'):
-                output_filename = filename.replace('.excalidraw', '.txt')
-            else:
-                output_filename = excalidraw_path.stem + '.txt'
-            output_file = excalidraw_path.parent / output_filename
+        # Determine output file path using helper
+        output_file = get_excalidraw_output_path(excalidraw_path, args.output)
         
         # Save the result with metadata if it was newly processed
         if was_processed:
