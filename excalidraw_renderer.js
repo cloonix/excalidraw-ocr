@@ -9,15 +9,14 @@ const fs = require('fs');
 
 function parseArgs() {
     const args = process.argv.slice(2);
-    if (args.length < 2) {
-        console.error('Usage: node excalidraw_renderer.js <compressed-data> <output-svg>');
-        console.error('  compressed-data: Base64 compressed Excalidraw JSON');
+    if (args.length < 1) {
+        console.error('Usage: node excalidraw_renderer.js <output-svg>');
+        console.error('  Reads compressed Excalidraw data from stdin');
         console.error('  output-svg: Path to output SVG file');
         process.exit(1);
     }
     return {
-        compressedData: args[0],
-        outputPath: args[1]
+        outputPath: args[0]
     };
 }
 
@@ -174,9 +173,33 @@ function escapeXml(unsafe) {
     });
 }
 
-function main() {
+async function readStdin() {
+    return new Promise((resolve, reject) => {
+        let data = '';
+        process.stdin.setEncoding('utf8');
+        
+        process.stdin.on('data', chunk => {
+            data += chunk;
+        });
+        
+        process.stdin.on('end', () => {
+            resolve(data.trim());
+        });
+        
+        process.stdin.on('error', reject);
+    });
+}
+
+async function main() {
     try {
-        const { compressedData, outputPath } = parseArgs();
+        const { outputPath } = parseArgs();
+        
+        // Read compressed data from stdin
+        const compressedData = await readStdin();
+        
+        if (!compressedData) {
+            throw new Error('No data received from stdin');
+        }
         
         // Decompress the data
         const excalidrawData = decompressExcalidraw(compressedData);
@@ -206,7 +229,13 @@ function main() {
 }
 
 if (require.main === module) {
-    main();
+    main().catch(error => {
+        console.error(JSON.stringify({
+            success: false,
+            error: error.message
+        }));
+        process.exit(1);
+    });
 }
 
 module.exports = { decompressExcalidraw, createSVGFromExcalidraw };

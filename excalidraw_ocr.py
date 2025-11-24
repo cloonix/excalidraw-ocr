@@ -126,9 +126,10 @@ def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict
         raise FileNotFoundError(f"Renderer script not found: {renderer_script}")
     
     try:
-        # Call Node.js renderer
+        # Call Node.js renderer, passing data via stdin
         result = subprocess.run(
-            ['node', str(renderer_script), compressed_data, output_svg_path],
+            ['node', str(renderer_script), output_svg_path],
+            input=compressed_data,
             capture_output=True,
             text=True,
             timeout=30
