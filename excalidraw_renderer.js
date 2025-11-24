@@ -170,11 +170,14 @@ function validateOutputPath(outputPath) {
      * @throws {Error} If path is unsafe
      */
     const os = require('os');
+    const fs = require('fs');
     
     // Resolve to absolute path
     const resolved = path.resolve(outputPath);
     const cwd = process.cwd();
-    const tempDir = os.tmpdir();
+    
+    // Resolve temp directory to handle symlinks (e.g., /tmp -> /private/tmp on macOS)
+    const tempDir = fs.realpathSync(os.tmpdir());
     
     // Check for suspicious patterns
     if (outputPath.includes('..')) {
