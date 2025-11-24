@@ -393,6 +393,7 @@ Examples:
   %(prog)s drawing.excalidraw.md -m MODEL           # Use specific OCR model
   %(prog)s drawing.excalidraw.md -c                 # Also copy to clipboard
   %(prog)s drawing.excalidraw.md -f                 # Force reprocessing
+  %(prog)s ./drawings/                              # Process all .excalidraw.md files in folder
 
 Note: Output is automatically saved to a file with the same name but without
       the .excalidraw part (e.g., "name.excalidraw.md" -> "name.md").
@@ -400,6 +401,9 @@ Note: Output is automatically saved to a file with the same name but without
       
       Results are cached - if the Excalidraw content hasn't changed, the
       cached output is used instead of reprocessing. Use -f to force.
+      
+      Batch Processing: When given a folder path, processes all .excalidraw.md
+      files in that folder. Shows summary at the end.
 
 Environment Variables:
   OPENROUTER_API_KEY    Your OpenRouter API key (required)
@@ -415,7 +419,7 @@ Requirements:
     
     parser.add_argument(
         "excalidraw_file",
-        help="Path to Excalidraw file (.excalidraw.md)",
+        help="Path to Excalidraw file (.excalidraw.md) or folder containing such files",
     )
     parser.add_argument(
         "-o", "--output",
@@ -439,32 +443,84 @@ Requirements:
     args = parser.parse_args()
     
     try:
-        # Process the file
-        excalidraw_path = Path(args.excalidraw_file).resolve()
-        extracted_text, was_processed, content_hash = process_excalidraw_file(
-            excalidraw_path,
-            output_path=args.output,
-            model=args.model,
-            force=args.force
-        )
+        input_path = Path(args.excalidraw_file).resolve()
         
-        # Determine output file path using helper
-        output_file = get_excalidraw_output_path(excalidraw_path, args.output)
-        
-        # Save the result with metadata if it was newly processed
-        if was_processed:
-            save_with_metadata(output_file, extracted_text, content_hash, str(excalidraw_path))
-            print(f"✓ Text saved to {output_file}", file=sys.stderr)
-        # If from cache, file already exists - just confirm it
+        # Determine if input is a file or folder
+        if input_path.is_file():
+            files_to_process = [input_path]
+        elif input_path.is_dir():
+            # Find all .excalidraw.md files in the directory
+            files_to_process = sorted(input_path.glob("*.excalidraw.md"))
+            if not files_to_process:
+                print(f"No .excalidraw.md files found in {input_path}", file=sys.stderr)
+                return 1
+            print(f"Found {len(files_to_process)} .excalidraw.md file(s) to process\n", file=sys.stderr)
         else:
-            print(f"✓ Using cached result: {output_file}", file=sys.stderr)
+            print(f"Error: {input_path} is neither a file nor a directory", file=sys.stderr)
+            return 1
         
-        # Copy to clipboard if requested
-        if args.clipboard:
-            copy_to_clipboard(extracted_text)
-            print("✓ Text copied to clipboard", file=sys.stderr)
+        # Check if output path is specified for multiple files
+        if len(files_to_process) > 1 and args.output:
+            print("Error: Cannot specify --output when processing multiple files", file=sys.stderr)
+            return 1
         
-        return 0
+        # Check if clipboard requested for multiple files
+        if len(files_to_process) > 1 and args.clipboard:
+            print("Error: Cannot use --clipboard when processing multiple files", file=sys.stderr)
+            return 1
+        
+        # Process all files
+        processed_count = 0
+        cached_count = 0
+        error_count = 0
+        
+        for excalidraw_path in files_to_process:
+            try:
+                # Process the file
+                extracted_text, was_processed, content_hash = process_excalidraw_file(
+                    excalidraw_path,
+                    output_path=args.output,
+                    model=args.model,
+                    force=args.force
+                )
+                
+                # Determine output file path using helper
+                output_file = get_excalidraw_output_path(excalidraw_path, args.output)
+                
+                # Save the result with metadata if it was newly processed
+                if was_processed:
+                    save_with_metadata(output_file, extracted_text, content_hash, str(excalidraw_path))
+                    print(f"✓ Text saved to {output_file}", file=sys.stderr)
+                    processed_count += 1
+                # If from cache, file already exists - just confirm it
+                else:
+                    print(f"✓ Using cached result: {output_file}", file=sys.stderr)
+                    cached_count += 1
+                
+                # Copy to clipboard if requested (only for single file)
+                if args.clipboard:
+                    copy_to_clipboard(extracted_text)
+                    print("✓ Text copied to clipboard", file=sys.stderr)
+                
+                # Add blank line between files when processing multiple
+                if len(files_to_process) > 1:
+                    print("", file=sys.stderr)
+                    
+            except Exception as e:
+                print(f"✗ Error processing {excalidraw_path.name}: {str(e)}", file=sys.stderr)
+                error_count += 1
+                if len(files_to_process) > 1:
+                    print("", file=sys.stderr)
+                    continue
+                else:
+                    return 1
+        
+        # Print summary for multiple files
+        if len(files_to_process) > 1:
+            print("=" * 60, file=sys.stderr)
+            print(f"Summary: {processed_count} processed, {cached_count} cached, {error_count} errors", file=sys.stderr)
+        
+        return 0 if error_count == 0 else 1
     
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
