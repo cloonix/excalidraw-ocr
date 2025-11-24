@@ -56,13 +56,14 @@ logger = logging.getLogger(__name__)
 setup_logging()
 
 
-def validate_output_path(output_path: str | Path, allow_absolute: bool = True) -> Path:
+def validate_output_path(output_path: str | Path, allow_absolute: bool = True, allow_temp: bool = False) -> Path:
     """
     Validate output path to prevent path traversal attacks.
     
     Args:
         output_path: Path to validate
         allow_absolute: Whether to allow absolute paths outside CWD
+        allow_temp: Whether to allow temporary directory paths (needed for temp files)
     
     Returns:
         Validated Path object
@@ -79,6 +80,12 @@ def validate_output_path(output_path: str | Path, allow_absolute: bool = True) -
     
     # Resolve to absolute path
     resolved = path.resolve()
+    
+    # Allow temp directory paths if requested
+    if allow_temp:
+        temp_dir = Path(tempfile.gettempdir()).resolve()
+        if str(resolved).startswith(str(temp_dir)):
+            return resolved
     
     # If not allowing absolute paths, ensure it's relative to CWD
     if not allow_absolute:

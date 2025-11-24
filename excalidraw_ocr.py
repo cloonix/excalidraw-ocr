@@ -215,8 +215,8 @@ def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict
     if not renderer_script.exists():
         raise FileNotFoundError(f"Renderer script not found: {renderer_script}")
     
-    # Validate SVG output path for security
-    safe_svg_path = validate_output_path(output_svg_path)
+    # Validate SVG output path for security (allow temp directory for temporary files)
+    safe_svg_path = validate_output_path(output_svg_path, allow_temp=True)
     logger.info(f"Rendering Excalidraw to SVG: {safe_svg_path.name}")
     
     try:

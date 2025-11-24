@@ -169,21 +169,24 @@ function validateOutputPath(outputPath) {
      * @returns {string} Resolved safe path
      * @throws {Error} If path is unsafe
      */
+    const os = require('os');
+    
     // Resolve to absolute path
     const resolved = path.resolve(outputPath);
     const cwd = process.cwd();
+    const tempDir = os.tmpdir();
     
     // Check for suspicious patterns
     if (outputPath.includes('..')) {
         throw new Error('Path traversal detected in output path');
     }
     
-    // Ensure it's within current working directory or /tmp
-    if (!resolved.startsWith(cwd) && !resolved.startsWith('/tmp')) {
-        throw new Error(`Output path must be within working directory: ${outputPath}`);
+    // Ensure it's within current working directory or temp directory
+    if (!resolved.startsWith(cwd) && !resolved.startsWith(tempDir)) {
+        throw new Error(`Output path must be within working directory or temp: ${outputPath}`);
     }
     
-    // Block sensitive directories
+    // Block sensitive directories (but allow temp)
     const sensitiveDirs = ['/etc/', '/usr/', '/bin/', '/sbin/', '/boot/', '/sys/', '/proc/'];
     for (const sensitive of sensitiveDirs) {
         if (resolved.startsWith(sensitive)) {
