@@ -1,0 +1,38 @@
+*.png
+*.md
+
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+output.txt
+result.txt
+*.txt
+!requirements.txt
+
+# Test images (optional - uncomment if you don't want to commit test images)
+# *.png
+# *.jpg
+# *.jpeg
