@@ -13,7 +13,6 @@ import re
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 # Import OCR functions from existing script
@@ -118,12 +117,10 @@ def clean_markdown_wrapper(text: str) -> str:
 
 def save_with_metadata(output_path: Path, text: str, content_hash: str, source_file: str):
     """Save output with YAML frontmatter metadata."""
-    # Create YAML frontmatter
+    # Create YAML frontmatter (only hash is needed for caching)
     frontmatter = [
         "---",
         f"excalidraw-ocr-hash: {content_hash}",
-        f"excalidraw-ocr-source: {source_file}",
-        f"excalidraw-ocr-date: {datetime.now().isoformat()}",
         "---",
         "",  # Empty line after frontmatter
     ]
