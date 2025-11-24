@@ -83,13 +83,14 @@ def copy_to_clipboard(text: str) -> None:
         raise Exception(f"Failed to copy to clipboard: {str(e)}")
 
 
-def perform_ocr(image_base64: str, model: str | None = None) -> str:
+def perform_ocr(image_base64: str, model: str | None = None, custom_prompt: str | None = None) -> str:
     """
     Send image to OpenRouter API for OCR.
     
     Args:
         image_base64: Base64 encoded image string
         model: OpenRouter model to use (optional, uses env var default)
+        custom_prompt: Custom instruction for AI (optional, uses default prompt)
     
     Returns:
         Extracted text from the image
@@ -101,6 +102,13 @@ def perform_ocr(image_base64: str, model: str | None = None) -> str:
         )
     
     model = model or OPENROUTER_MODEL
+    
+    # Use custom prompt if provided, otherwise use default
+    prompt = custom_prompt or (
+        "Please extract all text from this image. "
+        "If it contains handwriting, transcribe it as accurately as possible. "
+        "Return only the extracted text, without any additional commentary."
+    )
     
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -115,11 +123,7 @@ def perform_ocr(image_base64: str, model: str | None = None) -> str:
                 "content": [
                     {
                         "type": "text",
-                        "text": (
-                            "Please extract all text from this image. "
-                            "If it contains handwriting, transcribe it as accurately as possible. "
-                            "Return only the extracted text, without any additional commentary."
-                        ),
+                        "text": prompt,
                     },
                     {
                         "type": "image_url",
@@ -153,10 +157,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s image.png                    # Process image file
-  %(prog)s --clipboard                  # Process clipboard image, copy result back
-  %(prog)s image.jpg --model MODEL      # Use specific OpenRouter model
-  %(prog)s -c -o output.txt             # Save clipboard OCR to file
+  %(prog)s image.png                                    # Process image file
+  %(prog)s --clipboard                                  # Process clipboard image, copy result back
+  %(prog)s image.jpg --model MODEL                      # Use specific OpenRouter model
+  %(prog)s -c -o output.txt                             # Save clipboard OCR to file
+  %(prog)s diagram.png -p "Extract as Mermaid syntax"  # Custom prompt for diagrams
+  %(prog)s math.jpg -p "Convert to LaTeX equations"    # Extract math notation
 
 Environment Variables:
   OPENROUTER_API_KEY    Your OpenRouter API key (required)
@@ -181,6 +187,10 @@ Environment Variables:
     parser.add_argument(
         "-o", "--output",
         help="Save extracted text to file (disables clipboard copy)",
+    )
+    parser.add_argument(
+        "-p", "--prompt",
+        help="Custom instruction for the AI (e.g., 'Extract as Mermaid diagram')",
     )
     parser.add_argument(
         "--list-models",
@@ -231,7 +241,7 @@ Environment Variables:
         # Perform OCR
         model = args.model or OPENROUTER_MODEL
         print(f"Performing OCR with {model}...", file=sys.stderr)
-        extracted_text = perform_ocr(image_base64, model)
+        extracted_text = perform_ocr(image_base64, model, args.prompt)
         print("✓ OCR completed\n", file=sys.stderr)
         
         # Output results

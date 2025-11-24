@@ -211,7 +211,8 @@ def process_excalidraw_file(
     excalidraw_path: Path,
     output_path: str | None = None,
     model: str | None = None,
-    force: bool = False
+    force: bool = False,
+    custom_prompt: str | None = None
 ) -> tuple[str, bool, str]:
     """
     Process an Excalidraw file and extract text via OCR.
@@ -294,7 +295,7 @@ def process_excalidraw_file(
             
             # Perform OCR
             print(f"Performing OCR with {model or 'default model'}...", file=sys.stderr)
-            extracted_text = perform_ocr(image_base64, model)
+            extracted_text = perform_ocr(image_base64, model, custom_prompt)
             print("✓ OCR completed\n", file=sys.stderr)
             
             return extracted_text, True, content_hash
@@ -316,11 +317,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s drawing.excalidraw.md                    # Auto-save to drawing.md
-  %(prog)s drawing.excalidraw.md -o output.txt      # Save to custom file
-  %(prog)s drawing.excalidraw.md -m MODEL           # Use specific OCR model
-  %(prog)s drawing.excalidraw.md -c                 # Also copy to clipboard
-  %(prog)s drawing.excalidraw.md -f                 # Force reprocessing
+  %(prog)s drawing.excalidraw.md                                    # Auto-save to drawing.md
+  %(prog)s drawing.excalidraw.md -o output.txt                      # Save to custom file
+  %(prog)s drawing.excalidraw.md -m MODEL                           # Use specific OCR model
+  %(prog)s drawing.excalidraw.md -c                                 # Also copy to clipboard
+  %(prog)s drawing.excalidraw.md -f                                 # Force reprocessing
+  %(prog)s diagram.excalidraw.md -p "Extract as Mermaid diagram"   # Custom prompt
 
 Note: Output is automatically saved to a file with the same name but without
       the .excalidraw part (e.g., "name.excalidraw.md" -> "name.md").
@@ -363,6 +365,10 @@ Requirements:
         action="store_true",
         help="Force reprocessing even if output is up-to-date",
     )
+    parser.add_argument(
+        "-p", "--prompt",
+        help="Custom instruction for the AI (e.g., 'Extract as Mermaid diagram')",
+    )
     
     args = parser.parse_args()
     
@@ -373,7 +379,8 @@ Requirements:
             excalidraw_path,
             output_path=args.output,
             model=args.model,
-            force=args.force
+            force=args.force,
+            custom_prompt=args.prompt
         )
         
         # Determine output file path (same logic as in process_excalidraw_file)
