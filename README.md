@@ -5,10 +5,11 @@ Extract text from handwritten images using AI vision models via OpenRouter API.
 ## Features
 
 - 📝 Extract text from handwritten images
+- 🎨 **Extract text from Excalidraw drawings** (new!)
 - 📋 Support for both image files and clipboard input
 - ✨ Auto-copy OCR results back to clipboard when using clipboard mode
 - 🔄 Easy model switching via OpenRouter
-- 🎯 Multiple format support (PNG, JPG, JPEG, WEBP, GIF)
+- 🎯 Multiple format support (PNG, JPG, JPEG, WEBP, GIF, Excalidraw)
 - 💾 Save output to file or print to stdout
 - 🚀 Simple command-line interface
 
@@ -127,6 +128,99 @@ done
 python ocr.py handwriting.jpg --model google/gemini-flash-1.5
 python ocr.py handwriting.jpg --model anthropic/claude-3.5-sonnet
 ```
+
+## Excalidraw OCR (NEW!)
+
+Extract text from Excalidraw drawings created in Obsidian or the Excalidraw app.
+
+### Setup for Excalidraw
+
+In addition to the basic setup, you need to install cairo system libraries:
+
+```bash
+./install_cairo.sh
+```
+
+This will install:
+- Cairo graphics library (for rendering)
+- Node.js dependencies (for decompression)
+- Python cairosvg package (for SVG→PNG conversion)
+
+### Usage
+
+**Basic usage** (auto-saves to file):
+```bash
+python excalidraw_ocr.py drawing.excalidraw.md
+# Output: drawing.md (intermediate files auto-cleaned)
+```
+
+**Custom output file:**
+```bash
+python excalidraw_ocr.py drawing.excalidraw.md -o output.txt
+```
+
+**Copy result to clipboard:**
+```bash
+python excalidraw_ocr.py drawing.excalidraw.md -c
+```
+
+**Example with real file:**
+```bash
+python excalidraw_ocr.py "Notes 2025-11-24.excalidraw.md"
+# Output saved to: Notes 2025-11-24.md
+# Input file preserved: Notes 2025-11-24.excalidraw.md
+```
+
+> **Note:** The extracted text is automatically saved to a file with the same name but without the `.excalidraw` part:
+> - `drawing.excalidraw.md` → `drawing.md`
+> - `notes.excalidraw.md` → `notes.md`
+> 
+> Intermediate files (SVG, PNG) are automatically cleaned up after processing.
+
+### How It Works
+
+1. **Decompresses** the Excalidraw JSON data from the `.excalidraw.md` file
+2. **Renders** the drawing to SVG using Node.js
+3. **Converts** SVG to high-resolution PNG (2x scale for better OCR)
+4. **Extracts** text using OpenRouter AI vision models
+5. **Outputs** the recognized text
+
+### Requirements
+
+- **Node.js** - For Excalidraw decompression and rendering
+- **Cairo** - System library for SVG to PNG conversion
+- **OpenRouter API key** - Same as regular OCR
+
+### Troubleshooting Excalidraw OCR
+
+**Error: "cairosvg not available"**
+- Run `./install_cairo.sh` to install system dependencies
+- Or install manually:
+  ```bash
+  # Ubuntu/Debian
+  sudo apt-get install libcairo2-dev pkg-config python3-dev
+  pip install cairosvg
+  
+  # macOS
+  brew install cairo pkg-config
+  pip install cairosvg
+  ```
+
+**Error: "Node.js not found"**
+- Install Node.js from https://nodejs.org/
+- Or use your package manager:
+  ```bash
+  # Ubuntu/Debian
+  sudo apt-get install nodejs npm
+  
+  # macOS
+  brew install node
+  ```
+
+**No text extracted / Poor quality**
+- Try a different model: `--model anthropic/claude-3.5-sonnet`
+- Check if the drawing contains actual handwriting
+- Excalidraw text elements are rendered but may need clearer writing
 
 ## Troubleshooting
 
