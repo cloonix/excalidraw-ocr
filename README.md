@@ -108,37 +108,6 @@ options:
 
 See the full list at: https://openrouter.ai/models?order=newest&supported_parameters=vision
 
-## Custom Prompts
-
-Customize how the AI interprets your image with the `--prompt` / `-p` flag:
-
-**Extract diagrams as Mermaid syntax:**
-```bash
-python ocr.py flowchart.png --prompt "Extract this flowchart as Mermaid diagram syntax"
-```
-
-**Convert math to LaTeX:**
-```bash
-python ocr.py equations.jpg --prompt "Extract all mathematical equations as LaTeX notation"
-```
-
-**Preserve code formatting:**
-```bash
-python ocr.py code.png --prompt "Extract the code with proper indentation and syntax"
-```
-
-**Extract tables as markdown:**
-```bash
-python ocr.py table.png --prompt "Extract this table as a markdown table with proper alignment"
-```
-
-**Works with Excalidraw too:**
-```bash
-python excalidraw_ocr.py diagram.excalidraw.md --prompt "Convert to Mermaid flowchart syntax"
-```
-
-> **Note:** The custom prompt completely replaces the default instruction, so be specific about what you want the AI to extract and how to format it!
-
 ## Examples
 
 ### Example 1: Quick OCR from Screenshot
