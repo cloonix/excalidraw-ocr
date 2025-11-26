@@ -1,8 +1,9 @@
 *.png
 *.md
-# Exception: Allow Docker and security documentation
-!README-Docker.md
-!SECURITY.md
+# Exception: Allow important documentation
+!README*.md
+!AGENTS.md
+!.github/copilot-instructions.md
 
 # Environment variables
 .env
@@ -44,3 +45,18 @@ output/
 # *.jpg
 # *.jpeg
 node_modules/
+
+# Beads issue tracker
+.beads/beads.db
+.beads/beads.db-shm
+.beads/beads.db-wal
+.beads/daemon.lock
+.beads/daemon.log
+.beads/daemon.pid
+.beads/bd.sock
+.beads/*.left.jsonl
+.beads/*.left.meta.json
+# DO commit: .beads/beads.jsonl, .beads/config.yaml, .beads/metadata.json, .beads/README.md
+
+# AI planning documents (ephemeral)
+history/
