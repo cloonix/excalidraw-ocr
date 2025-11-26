@@ -22,6 +22,7 @@ from ocr_lib import (
     temp_file,
     get_excalidraw_output_path,
     validate_output_path,
+    set_api_provider,
     MAX_EXCALIDRAW_SIZE_MB,
     logger
 )
@@ -408,13 +409,14 @@ def process_excalidraw_file(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract text from Excalidraw drawings using AI OCR (OpenRouter)",
+        description="Extract text from Excalidraw drawings using AI OCR (OpenAI/OpenRouter)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   %(prog)s drawing.excalidraw.md                    # Auto-save to drawing.md
   %(prog)s drawing.excalidraw.md -o output.txt      # Save to custom file
   %(prog)s drawing.excalidraw.md -m MODEL           # Use specific OCR model
+  %(prog)s drawing.excalidraw.md --provider openrouter  # Use OpenRouter instead of OpenAI
   %(prog)s drawing.excalidraw.md -c                 # Also copy to clipboard
   %(prog)s drawing.excalidraw.md -f                 # Force reprocessing
   %(prog)s ./drawings/                              # Process all .excalidraw.md files in folder
@@ -430,8 +432,10 @@ Note: Output is automatically saved to a file with the same name but without
       files in that folder. Shows summary at the end.
 
 Environment Variables:
-  OPENROUTER_API_KEY    Your OpenRouter API key (required)
-  OPENROUTER_MODEL      Default model to use (default: google/gemini-flash-1.5)
+  OPENAI_API_KEY        Your OpenAI API key (preferred if set)
+  OPENAI_MODEL          OpenAI model to use (default: gpt-4o)
+  OPENROUTER_API_KEY    Your OpenRouter API key (fallback)
+  OPENROUTER_MODEL      OpenRouter model to use (default: google/gemini-flash-1.5)
 
 Requirements:
   - Node.js and npm (for Excalidraw rendering)
@@ -451,7 +455,12 @@ Requirements:
     )
     parser.add_argument(
         "-m", "--model",
-        help="OpenRouter model to use (overrides OPENROUTER_MODEL env var)",
+        help="Model to use (overrides default env var model)",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["openai", "openrouter"],
+        help="API provider to use (default: auto-detect based on API keys)",
     )
     parser.add_argument(
         "-c", "--clipboard",
@@ -465,6 +474,15 @@ Requirements:
     )
     
     args = parser.parse_args()
+    
+    # Override API provider if specified
+    if args.provider:
+        try:
+            set_api_provider(args.provider)
+        except ValueError as e:
+            logger.error(f"Provider configuration error: {e}")
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
     
     try:
         input_path = Path(args.excalidraw_file).resolve()

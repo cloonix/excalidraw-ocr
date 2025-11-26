@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OCR Script using OpenRouter API
+OCR Script using OpenAI/OpenRouter API
 Extracts text from handwritten images using AI vision models.
 Supports both image files and clipboard input.
 """
@@ -18,7 +18,9 @@ from ocr_lib import (
     perform_ocr, 
     save_output, 
     copy_to_clipboard,
-    OPENROUTER_MODEL,
+    set_api_provider,
+    DEFAULT_MODEL,
+    API_NAME,
     MAX_IMAGE_SIZE_MB,
     MAX_IMAGE_DIMENSION,
     logger
@@ -114,18 +116,21 @@ def load_image_from_clipboard() -> Image.Image:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract text from handwritten images using AI OCR (OpenRouter)",
+        description="Extract text from handwritten images using AI OCR (OpenAI/OpenRouter)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   %(prog)s image.png                    # Process image file
   %(prog)s --clipboard                  # Process clipboard image, copy result back
-  %(prog)s image.jpg --model MODEL      # Use specific OpenRouter model
+  %(prog)s image.jpg --model MODEL      # Use specific model
+  %(prog)s image.png --provider openrouter  # Use OpenRouter instead of OpenAI
   %(prog)s -c -o output.txt             # Save clipboard OCR to file
 
 Environment Variables:
-  OPENROUTER_API_KEY    Your OpenRouter API key (required)
-  OPENROUTER_MODEL      Default model to use (default: google/gemini-flash-1.5)
+  OPENAI_API_KEY        Your OpenAI API key (preferred if set)
+  OPENAI_MODEL          OpenAI model to use (default: gpt-4o)
+  OPENROUTER_API_KEY    Your OpenRouter API key (fallback)
+  OPENROUTER_MODEL      OpenRouter model to use (default: google/gemini-flash-1.5)
         """
     )
     
@@ -141,7 +146,12 @@ Environment Variables:
     )
     parser.add_argument(
         "-m", "--model",
-        help="OpenRouter model to use (overrides OPENROUTER_MODEL env var)",
+        help="Model to use (overrides default env var model)",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["openai", "openrouter"],
+        help="API provider to use (default: auto-detect based on API keys)",
     )
     parser.add_argument(
         "-o", "--output",
@@ -150,7 +160,7 @@ Environment Variables:
     parser.add_argument(
         "--list-models",
         action="store_true",
-        help="Show popular vision models available on OpenRouter",
+        help="Show popular vision models",
     )
     parser.add_argument(
         "--no-clipboard-copy",
@@ -160,15 +170,29 @@ Environment Variables:
     
     args = parser.parse_args()
     
+    # Override API provider if specified
+    if args.provider:
+        try:
+            set_api_provider(args.provider)
+        except ValueError as e:
+            logger.error(f"Provider configuration error: {e}")
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+    
     # Show model list if requested
     if args.list_models:
-        print("Popular Vision Models on OpenRouter:")
-        print("  - google/gemini-flash-1.5 (fast, affordable)")
-        print("  - google/gemini-pro-1.5 (high quality)")
-        print("  - anthropic/claude-3.5-sonnet (excellent accuracy)")
-        print("  - openai/gpt-4o (strong performance)")
-        print("  - qwen/qwen-2-vl-72b-instruct (open source)")
-        print("\nSee https://openrouter.ai/models for full list")
+        print(f"Currently using: {API_NAME}")
+        print("\nPopular Vision Models:")
+        print("  OpenAI:")
+        print("    - gpt-4o (best, most capable)")
+        print("    - gpt-4o-mini (fast, affordable)")
+        print("  OpenRouter:")
+        print("    - google/gemini-flash-1.5 (fast, affordable)")
+        print("    - google/gemini-pro-1.5 (high quality)")
+        print("    - anthropic/claude-3.5-sonnet (excellent accuracy)")
+        print("    - openai/gpt-4o (strong performance)")
+        print("    - qwen/qwen-2-vl-72b-instruct (open source)")
+        print("\nSet OPENAI_API_KEY to use OpenAI, or OPENROUTER_API_KEY for OpenRouter")
         return 0
     
     # Validate input arguments
@@ -194,8 +218,8 @@ Environment Variables:
         print("✓ Image encoded", file=sys.stderr)
         
         # Perform OCR
-        model = args.model or OPENROUTER_MODEL
-        print(f"Performing OCR with {model}...", file=sys.stderr)
+        model = args.model or DEFAULT_MODEL
+        print(f"Performing OCR with {API_NAME} ({model})...", file=sys.stderr)
         extracted_text = perform_ocr(image_base64, model)
         print("✓ OCR completed\n", file=sys.stderr)
         

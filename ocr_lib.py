@@ -24,9 +24,21 @@ from PIL import Image
 load_dotenv()
 
 # Configuration constants
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-flash-1.5")
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Determine which API to use (prefer OpenAI if key is set)
+# This can be overridden by set_api_provider()
+USE_OPENAI = bool(OPENAI_API_KEY)
+API_KEY = OPENAI_API_KEY if USE_OPENAI else OPENROUTER_API_KEY
+DEFAULT_MODEL = OPENAI_MODEL if USE_OPENAI else OPENROUTER_MODEL
+API_URL = OPENAI_API_URL if USE_OPENAI else OPENROUTER_API_URL
+API_NAME = "OpenAI" if USE_OPENAI else "OpenRouter"
 
 # Image processing constants
 IMAGE_ENCODE_QUALITY = 95  # High quality for OCR accuracy
@@ -54,6 +66,46 @@ def setup_logging(log_level=logging.INFO):
 
 logger = logging.getLogger(__name__)
 setup_logging()
+
+# Thread safety for API provider switching
+import threading
+_config_lock = threading.Lock()
+
+def set_api_provider(provider: str):
+    """
+    Override the default API provider selection (thread-safe).
+    
+    Args:
+        provider: Either "openai" or "openrouter"
+    
+    Raises:
+        ValueError: If provider is invalid or API key not available
+    """
+    global API_KEY, DEFAULT_MODEL, API_URL, API_NAME, USE_OPENAI
+    
+    with _config_lock:  # Thread-safe global state mutation
+        provider = provider.lower()
+        
+        if provider == "openai":
+            if not OPENAI_API_KEY:
+                raise ValueError("OPENAI_API_KEY not set. Cannot use OpenAI provider.")
+            API_KEY = OPENAI_API_KEY
+            DEFAULT_MODEL = OPENAI_MODEL
+            API_URL = OPENAI_API_URL
+            API_NAME = "OpenAI"
+            USE_OPENAI = True
+            logger.info("Switched to OpenAI provider")
+        elif provider == "openrouter":
+            if not OPENROUTER_API_KEY:
+                raise ValueError("OPENROUTER_API_KEY not set. Cannot use OpenRouter provider.")
+            API_KEY = OPENROUTER_API_KEY
+            DEFAULT_MODEL = OPENROUTER_MODEL
+            API_URL = OPENROUTER_API_URL
+            API_NAME = "OpenRouter"
+            USE_OPENAI = False
+            logger.info("Switched to OpenRouter provider")
+        else:
+            raise ValueError(f"Invalid provider: {provider}. Must be 'openai' or 'openrouter'.")
 
 
 def validate_output_path(output_path: str | Path, allow_absolute: bool = True, allow_temp: bool = False) -> Path:
@@ -150,6 +202,7 @@ def encode_image_to_base64(image: Image.Image) -> str:
     
     Note:
         Converts RGBA/LA/P images to RGB with white background for compatibility.
+        Resizes very large images to prevent API payload issues.
     """
     buffered = BytesIO()
     
@@ -161,6 +214,15 @@ def encode_image_to_base64(image: Image.Image) -> str:
         background.paste(image, mask=image.split()[-1] if image.mode in ("RGBA", "LA") else None)
         image = background
     
+    # Resize if image is too large (helps prevent API payload issues)
+    max_dimension = 4096  # Reasonable size for vision models
+    if image.width > max_dimension or image.height > max_dimension:
+        logger.info(f"Resizing large image from {image.width}x{image.height}")
+        ratio = min(max_dimension / image.width, max_dimension / image.height)
+        new_size = (int(image.width * ratio), int(image.height * ratio))
+        image = image.resize(new_size, Image.Resampling.LANCZOS)
+        logger.info(f"Resized to {image.width}x{image.height}")
+    
     image.save(buffered, format="JPEG", quality=IMAGE_ENCODE_QUALITY)
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
@@ -168,31 +230,31 @@ def encode_image_to_base64(image: Image.Image) -> str:
 @rate_limit(max_calls=10, period=60)  # 10 requests per minute
 def perform_ocr(image_base64: str, model: str | None = None) -> str:
     """
-    Send image to OpenRouter API for OCR using vision models.
+    Send image to OpenAI or OpenRouter API for OCR using vision models.
     
     Args:
         image_base64: Base64-encoded image string
-        model: OpenRouter model to use (optional, uses OPENROUTER_MODEL env var)
+        model: Model to use (optional, uses OPENAI_MODEL or OPENROUTER_MODEL env var)
     
     Returns:
         Extracted text from the image
     
     Raises:
-        ValueError: If OPENROUTER_API_KEY is not set
+        ValueError: If neither OPENAI_API_KEY nor OPENROUTER_API_KEY is set
         Exception: If API request fails or returns an error
     """
-    if not OPENROUTER_API_KEY:
-        logger.error("OPENROUTER_API_KEY not set")
+    if not API_KEY:
+        logger.error("No API key set")
         raise ValueError(
-            "OPENROUTER_API_KEY not found. "
-            "Please set it in your .env file or environment variables."
+            "Neither OPENAI_API_KEY nor OPENROUTER_API_KEY found. "
+            "Please set one in your .env file or environment variables."
         )
     
-    model = model or OPENROUTER_MODEL
-    logger.info(f"Performing OCR with model: {model}")
+    model = model or DEFAULT_MODEL
+    logger.info(f"Performing OCR with {API_NAME} model: {model}")
     
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
     }
     
@@ -231,15 +293,17 @@ def perform_ocr(image_base64: str, model: str | None = None) -> str:
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["POST"]
+            allowed_methods=["POST"],
+            raise_on_status=False  # Let us handle status codes
         )
         
         adapter = HTTPAdapter(max_retries=retries)
         session.mount("https://", adapter)
         session.mount("http://", adapter)
         
+        logger.info(f"Sending OCR request to {API_NAME} (may retry up to 5 times on errors)...")
         response = session.post(
-            OPENROUTER_API_URL, 
+            API_URL, 
             headers=headers, 
             json=payload, 
             timeout=API_TIMEOUT_SECONDS,
@@ -251,7 +315,7 @@ def perform_ocr(image_base64: str, model: str | None = None) -> str:
         
         if "error" in data:
             logger.error(f"API error: {data['error']}")
-            raise Exception(f"OpenRouter API error: {data['error']}")
+            raise Exception(f"{API_NAME} API error: {data['error']}")
         
         logger.info("OCR completed successfully")
         return data["choices"][0]["message"]["content"].strip()
