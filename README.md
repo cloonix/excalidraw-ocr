@@ -1,165 +1,31 @@
-# AI-Powered OCR with OpenRouter
+# Excalidraw OCR
 
 [![Docker Build](https://github.com/cloonix/excalidraw-ocr/actions/workflows/docker-build.yml/badge.svg)](https://github.com/cloonix/excalidraw-ocr/actions/workflows/docker-build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docker Pulls](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/cloonix/excalidraw-ocr/pkgs/container/ocr)
 
-Extract text from handwritten images using AI vision models via OpenRouter API.
+Extract text from handwritten images and Excalidraw drawings using AI vision models.
 
-> **🚀 Quick Start with Docker**: `docker pull ghcr.io/cloonix/excalidraw-ocr:latest` - No installation required!
+## Quick Start
 
-## Features
-
-- 📝 Extract text from handwritten images
-- 🎨 **Extract text from Excalidraw drawings** (new!)
-- 📋 Support for both image files and clipboard input
-- ✨ Auto-copy OCR results back to clipboard when using clipboard mode
-- 🔄 Easy model switching via OpenRouter
-- 🎯 Multiple format support (PNG, JPG, JPEG, WEBP, GIF, Excalidraw)
-- 💾 Save output to file or print to stdout
-- 🚀 Simple command-line interface
-
-## Installation
-
-1. Clone or download this repository
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Get an OpenRouter API key:
-   - Sign up at https://openrouter.ai/
-   - Get your API key from https://openrouter.ai/keys
-   - Add credits to your account
-
-4. Create a `.env` file:
-```bash
-cp .env.example .env
-```
-
-5. Edit `.env` and add your API key:
-```
-OPENROUTER_API_KEY=your_key_here
-OPENROUTER_MODEL=google/gemini-flash-1.5
-```
-
-## Usage
-
-### Basic Usage
-
-Extract text from an image file:
-```bash
-python ocr.py image.png
-```
-
-Extract text from clipboard (result automatically copied back to clipboard):
-```bash
-python ocr.py --clipboard
-```
-
-### Advanced Usage
-
-Use a specific model:
-```bash
-python ocr.py image.jpg --model anthropic/claude-3.5-sonnet
-```
-
-Save output to file:
-```bash
-python ocr.py image.png --output result.txt
-```
-
-Combine options:
-```bash
-python ocr.py --clipboard --model google/gemini-pro-1.5 --output output.txt
-```
-
-List available models:
-```bash
-python ocr.py --list-models
-```
-
-### Command-Line Options
-
-```
-positional arguments:
-  image                 Path to image file (PNG, JPG, JPEG, WEBP, GIF)
-
-options:
-  -h, --help            Show help message
-  -c, --clipboard       Read image from clipboard and copy result back to clipboard
-  -m MODEL, --model MODEL
-                        OpenRouter model to use
-  -o OUTPUT, --output OUTPUT
-                        Save extracted text to file (disables clipboard copy)
-  --list-models         Show popular vision models
-  --no-clipboard-copy   Don't copy result to clipboard when using --clipboard mode
-```
-
-## Recommended Models
-
-### Fast & Affordable
-- `google/gemini-flash-1.5` (default) - Best balance of speed and cost
-- `google/gemini-flash-1.5-8b` - Even faster, lower cost
-
-### High Quality
-- `anthropic/claude-3.5-sonnet` - Excellent accuracy for handwriting
-- `google/gemini-pro-1.5` - High quality results
-- `openai/gpt-4o` - Strong overall performance
-
-### Open Source
-- `qwen/qwen-2-vl-72b-instruct` - Good open-source alternative
-- `meta-llama/llama-3.2-90b-vision-instruct` - Meta's vision model
-
-See the full list at: https://openrouter.ai/models?order=newest&supported_parameters=vision
-
-## Examples
-
-### Example 1: Quick OCR from Screenshot
-1. Take a screenshot (it's now in your clipboard)
-2. Run: `python ocr.py --clipboard`
-3. The extracted text is automatically copied back to your clipboard
-4. Paste it anywhere you need!
-
-### Example 2: Batch Processing
-```bash
-for img in images/*.png; do
-  python ocr.py "$img" --output "text/$(basename "$img" .png).txt"
-done
-```
-
-### Example 3: Test Different Models
-```bash
-python ocr.py handwriting.jpg --model google/gemini-flash-1.5
-python ocr.py handwriting.jpg --model anthropic/claude-3.5-sonnet
-```
-
-## Docker Usage
-
-Run OCR in a containerized environment without installing dependencies locally.
-
-### Quick Start with Pre-built Image
-
-**No build required** - use the pre-built multi-architecture image:
+### Using Docker (Recommended)
 
 ```bash
-# Pull the latest image (supports linux/amd64 and linux/arm64)
+# Pull the pre-built image
 docker pull ghcr.io/cloonix/excalidraw-ocr:latest
 
-# Run one-shot OCR
+# Extract text from an image
 docker run --rm -v ./data:/data \
   -e OPENAI_API_KEY=your_key_here \
   ghcr.io/cloonix/excalidraw-ocr:latest \
   python ocr.py /data/image.png
 
-# Run Excalidraw OCR
+# Extract text from Excalidraw drawing
 docker run --rm -v ./data:/data \
   -e OPENAI_API_KEY=your_key_here \
   ghcr.io/cloonix/excalidraw-ocr:latest \
   python excalidraw_ocr.py /data/drawing.excalidraw.md
 
-# Start watch mode
+# Watch mode - automatically process new files
 docker run -d --name ocr-watch \
   -v ./watch:/watch \
   -e OPENAI_API_KEY=your_key_here \
@@ -167,215 +33,130 @@ docker run -d --name ocr-watch \
   python excalidraw_ocr.py /watch -w
 ```
 
-**Available tags:**
-- `latest` - Latest stable release
-- `v1.0.0`, `v1.0`, `v1` - Semantic version tags
-- Works on: x86_64 (amd64) and ARM64 (Raspberry Pi, Apple Silicon, AWS Graviton)
-
----
-
-### Build from Source
-
-The unified `docker-compose.yml` supports three modes:
-
-### Quick Start (Build Locally)
+### Local Installation
 
 ```bash
-# 1. Setup
-make setup        # Creates directories and .env file
-make build        # Build Docker image
+# Install dependencies
+pip install -r requirements.txt
+npm install
+./install_cairo.sh  # For Excalidraw support
 
-# 2. Run one-shot OCR on an image
-make ocr IMAGE=/data/handwriting.jpg
+# Configure API key
+cp .env.example .env
+# Edit .env and add your OPENAI_API_KEY or OPENROUTER_API_KEY
 
-# 3. Or start watch mode for continuous Excalidraw processing
-make watch-start  # Monitors ./watch folder
+# Run OCR
+python ocr.py image.png
+python ocr.py --clipboard  # From clipboard
+
+# Run Excalidraw OCR
+python excalidraw_ocr.py drawing.excalidraw.md
+python excalidraw_ocr.py folder/ -w  # Watch mode
 ```
 
-### Docker Modes
+## Features
 
-**One-Shot OCR (General Images)**
+- 📝 Extract text from handwritten images
+- 🎨 Extract text from Excalidraw drawings
+- 📋 Clipboard support (copy image → extract text → copy result)
+- 👁️ Watch mode for continuous processing
+- 🐳 Docker support with pre-built images
+- 🔄 Supports OpenAI and OpenRouter APIs
+- 💾 Smart caching to avoid reprocessing
+- 🌍 Multi-platform: x86_64 and ARM64
+
+## API Keys
+
+Get an API key from:
+- **OpenAI** (recommended): https://platform.openai.com/api-keys
+- **OpenRouter** (alternative): https://openrouter.ai/keys
+
+Set in `.env` file:
 ```bash
-# Place images in ./data folder
-make ocr IMAGE=/data/photo.png
-make ocr IMAGE=/data/document.jpg OUTPUT=/data/result.txt
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-4o
+
+# OR
+
+OPENROUTER_API_KEY=your_key_here
+OPENROUTER_MODEL=google/gemini-flash-1.5
 ```
 
-**One-Shot Excalidraw**
+## Docker Compose
+
+Build and run locally:
+
 ```bash
-# Place .excalidraw.md files in ./data folder
+# Setup
+make setup  # Creates directories and .env file
+make build  # Build Docker image
+
+# Run
+make ocr IMAGE=/data/image.png
 make excalidraw FILE=/data/drawing.excalidraw.md
-```
-
-**Watch Mode (Continuous)**
-```bash
-# Automatically processes new .excalidraw.md files
-make watch-start  # Start monitoring ./watch folder
-make watch-logs   # View processing logs
+make watch-start  # Start watch mode
+make watch-logs   # View logs
 make watch-stop   # Stop watch mode
 ```
 
-### Direct Docker Compose Commands
+Or use `docker-compose.yml` directly:
 
 ```bash
-# One-shot image OCR
-docker compose run --rm ocr python ocr.py /data/image.png -o /data/text.txt
-
-# One-shot Excalidraw
+docker compose run --rm ocr python ocr.py /data/image.png
 docker compose run --rm excalidraw python excalidraw_ocr.py /data/drawing.excalidraw.md
-
-# Watch mode (background service)
 docker compose up -d watch
-docker compose logs -f watch
-docker compose stop watch
 ```
 
-### Docker Benefits
+## Command Line Options
 
-- ✅ No local Python/Node.js installation required
-- ✅ Consistent environment across all platforms (Linux, macOS, Windows)
-- ✅ ARM64 support (Raspberry Pi, Apple Silicon, AWS Graviton)
-- ✅ Isolated dependencies and security
-- ✅ Easy cleanup and updates
-
-See [README-Docker.md](README-Docker.md) and [README-Docker-Watch.md](README-Docker-Watch.md) for detailed documentation.
-
----
-
-## Excalidraw OCR (NEW!)
-
-Extract text from Excalidraw drawings created in Obsidian or the Excalidraw app.
-
-### Setup for Excalidraw
-
-In addition to the basic setup, you need to install cairo system libraries:
+### General OCR (`ocr.py`)
 
 ```bash
-./install_cairo.sh
+python ocr.py image.png                           # Basic usage
+python ocr.py --clipboard                         # From clipboard
+python ocr.py image.png -o output.txt             # Save to file
+python ocr.py image.png -m anthropic/claude-3.5-sonnet  # Use specific model
+python ocr.py --list-models                       # Show available models
 ```
 
-This will install:
-- Cairo graphics library (for rendering)
-- Node.js dependencies (for decompression)
-- Python cairosvg package (for SVG→PNG conversion)
+### Excalidraw OCR (`excalidraw_ocr.py`)
 
-### Usage
-
-**Basic usage** (auto-saves to file):
 ```bash
-python excalidraw_ocr.py drawing.excalidraw.md
-# Output: drawing.md (intermediate files auto-cleaned)
+python excalidraw_ocr.py drawing.excalidraw.md    # Basic usage (auto-saves as drawing.md)
+python excalidraw_ocr.py drawing.excalidraw.md -o output.txt  # Custom output
+python excalidraw_ocr.py drawing.excalidraw.md -c # Copy to clipboard
+python excalidraw_ocr.py folder/ -w               # Watch mode
+python excalidraw_ocr.py drawing.excalidraw.md -f # Force reprocess (ignore cache)
 ```
 
-**Custom output file:**
-```bash
-python excalidraw_ocr.py drawing.excalidraw.md -o output.txt
-```
+## Recommended Models
 
-**Copy result to clipboard:**
-```bash
-python excalidraw_ocr.py drawing.excalidraw.md -c
-```
+**Fast & Cheap:**
+- `google/gemini-flash-1.5` (default for OpenRouter)
+- `gpt-4o-mini` (OpenAI)
 
-**Force reprocessing (bypass cache):**
-```bash
-python excalidraw_ocr.py drawing.excalidraw.md -f
-```
-
-**Example with real file:**
-```bash
-python excalidraw_ocr.py "Notes 2025-11-24.excalidraw.md"
-# Output saved to: Notes 2025-11-24.md
-# Input file preserved: Notes 2025-11-24.excalidraw.md
-```
-
-> **Note:** The extracted text is automatically saved to a file with the same name but without the `.excalidraw` part:
-> - `drawing.excalidraw.md` → `drawing.md`
-> - `notes.excalidraw.md` → `notes.md`
-> 
-> Intermediate files (SVG, PNG) are automatically cleaned up after processing.
-> 
-> **Smart Caching:** Results are cached based on content hash. If you run the same file again without changes, it will use the cached result instead of reprocessing. Use `-f` to force reprocessing.
-
-### How It Works
-
-1. **Decompresses** the Excalidraw JSON data from the `.excalidraw.md` file
-2. **Renders** the drawing to SVG using Node.js
-3. **Converts** SVG to high-resolution PNG (2x scale for better OCR)
-4. **Extracts** text using OpenRouter AI vision models
-5. **Outputs** the recognized text
-
-### Requirements
-
-- **Node.js** - For Excalidraw decompression and rendering
-- **Cairo** - System library for SVG to PNG conversion
-- **OpenRouter API key** - Same as regular OCR
-
-### Troubleshooting Excalidraw OCR
-
-**Error: "cairosvg not available"**
-- Run `./install_cairo.sh` to install system dependencies
-- Or install manually:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install libcairo2-dev pkg-config python3-dev
-  pip install cairosvg
-  
-  # macOS
-  brew install cairo pkg-config
-  pip install cairosvg
-  ```
-
-**Error: "Node.js not found"**
-- Install Node.js from https://nodejs.org/
-- Or use your package manager:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install nodejs npm
-  
-  # macOS
-  brew install node
-  ```
-
-**No text extracted / Poor quality**
-- Try a different model: `--model anthropic/claude-3.5-sonnet`
-- Check if the drawing contains actual handwriting
-- Excalidraw text elements are rendered but may need clearer writing
+**High Quality:**
+- `gpt-4o` (default for OpenAI)
+- `anthropic/claude-3.5-sonnet`
 
 ## Troubleshooting
 
-### "No image found in clipboard"
-- Make sure you've copied an image (not a file path) to your clipboard
-- On Linux, you may need additional packages: `sudo apt install xclip python3-tk`
+**"OPENAI_API_KEY not found"**
+- Create `.env` file with your API key
 
-### "OPENROUTER_API_KEY not found"
-- Check that your `.env` file exists in the same directory as `ocr.py`
-- Verify the API key is set correctly in `.env`
+**"cairosvg not available"** (Excalidraw only)
+- Run `./install_cairo.sh`
+- Or install manually: `brew install cairo pkg-config` (macOS) or `sudo apt-get install libcairo2-dev pkg-config python3-dev` (Ubuntu)
 
-### "API request failed"
-- Check your internet connection
-- Verify your OpenRouter account has credits
-- Check the model name is correct
-
-### Poor OCR Quality
-- Try a more powerful model (e.g., Claude 3.5 Sonnet)
-- Ensure the image is clear and well-lit
-- Higher resolution images generally work better
-
-## Cost Information
-
-OpenRouter charges based on the model and tokens used. Vision models typically cost:
-
-- Gemini Flash 1.5: ~$0.0001-0.0003 per image
-- Claude 3.5 Sonnet: ~$0.003-0.015 per image
-- GPT-4o: ~$0.0025-0.01 per image
-
-Check current pricing at: https://openrouter.ai/models
+**"No text extracted"**
+- Try a better model: `--model anthropic/claude-3.5-sonnet`
+- Check image quality
+- Verify API credits
 
 ## License
 
-MIT License - feel free to use and modify as needed.
+MIT License - See [LICENSE](LICENSE)
 
 ## Contributing
 
-Contributions welcome! Feel free to open issues or submit pull requests.
+Issues and pull requests welcome!
