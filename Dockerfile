@@ -62,7 +62,6 @@ COPY --from=builder /app/node_modules ./node_modules
 
 # Copy application files
 COPY --chown=ocruser:ocruser *.py *.js package.json ./
-COPY --chown=ocruser:ocruser SECURITY.md ./
 
 # Create mount points
 RUN mkdir -p /input /output && \
