@@ -13,7 +13,13 @@ Extract text from handwritten images and Excalidraw drawings using AI vision mod
 # Pull the pre-built image
 docker pull ghcr.io/cloonix/excalidraw-ocr:latest
 
-# Extract text from an image
+# Extract text from an image (using .env file)
+docker run --rm -v ./data:/data \
+  --env-file .env \
+  ghcr.io/cloonix/excalidraw-ocr:latest \
+  python ocr.py /data/image.png
+
+# Or pass API key directly
 docker run --rm -v ./data:/data \
   -e OPENAI_API_KEY=your_key_here \
   ghcr.io/cloonix/excalidraw-ocr:latest \
@@ -21,14 +27,14 @@ docker run --rm -v ./data:/data \
 
 # Extract text from Excalidraw drawing
 docker run --rm -v ./data:/data \
-  -e OPENAI_API_KEY=your_key_here \
+  --env-file .env \
   ghcr.io/cloonix/excalidraw-ocr:latest \
   python excalidraw_ocr.py /data/drawing.excalidraw.md
 
 # Watch mode - automatically process new files
 docker run -d --name ocr-watch \
   -v ./watch:/watch \
-  -e OPENAI_API_KEY=your_key_here \
+  --env-file .env \
   ghcr.io/cloonix/excalidraw-ocr:latest \
   python excalidraw_ocr.py /watch -w
 ```
