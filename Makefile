@@ -46,8 +46,8 @@ help:
 	@echo "  make clean-all    - Remove containers, volumes, and images"
 	@echo ""
 	@echo "$(YELLOW)Examples:$(NC)"
-	@echo "  make ocr IMAGE=/input/handwriting.jpg"
-	@echo "  make excalidraw FILE=/input/drawing.excalidraw.md"
+	@echo "  make ocr IMAGE=/data/handwriting.jpg"
+	@echo "  make excalidraw FILE=/data/drawing.excalidraw.md"
 	@echo "  make watch-start  # Monitors ./watch folder continuously"
 
 build:
@@ -57,7 +57,7 @@ build:
 
 setup:
 	@echo "$(GREEN)Setting up directories...$(NC)"
-	mkdir -p input output
+	mkdir -p data watch
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
 		echo "$(YELLOW)Created .env file from .env.example$(NC)"; \
@@ -70,8 +70,8 @@ setup:
 	@echo "Next steps:"
 	@echo "  1. Edit .env and add your API key"
 	@echo "  2. Run 'make build' to build the image"
-	@echo "  3. Place images in ./input/"
-	@echo "  4. Run 'make ocr IMAGE=/input/yourimage.png'"
+	@echo "  3. Place images in ./data/"
+	@echo "  4. Run 'make ocr IMAGE=/data/yourimage.png'"
 
 run:
 	@echo "$(GREEN)Starting OCR container...$(NC)"
@@ -99,7 +99,7 @@ list-models:
 
 ocr:
 	@if [ -z "$(IMAGE)" ]; then \
-		echo "$(YELLOW)Usage: make ocr IMAGE=/input/yourimage.png [OUTPUT=/output/result.txt]$(NC)"; \
+		echo "$(YELLOW)Usage: make ocr IMAGE=/data/yourimage.png [OUTPUT=/data/result.txt]$(NC)"; \
 		exit 1; \
 	fi
 	@if [ -n "$(OUTPUT)" ]; then \
@@ -110,7 +110,7 @@ ocr:
 
 excalidraw:
 	@if [ -z "$(FILE)" ]; then \
-		echo "$(YELLOW)Usage: make excalidraw FILE=/input/drawing.excalidraw.md$(NC)"; \
+		echo "$(YELLOW)Usage: make excalidraw FILE=/data/drawing.excalidraw.md$(NC)"; \
 		exit 1; \
 	fi
 	$(DOCKER_COMPOSE) run --rm excalidraw python excalidraw_ocr.py $(FILE)
@@ -145,20 +145,20 @@ dev-logs:
 
 # Batch processing
 batch-ocr:
-	@echo "$(GREEN)Batch processing all images in ./input/...$(NC)"
-	@for img in input/*.{png,jpg,jpeg,PNG,JPG,JPEG}; do \
+	@echo "$(GREEN)Batch processing all images in ./data/...$(NC)"
+	@for img in data/*.{png,jpg,jpeg,PNG,JPG,JPEG}; do \
 		if [ -f "$$img" ]; then \
 			echo "Processing $$img..."; \
-			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/output/$$(basename $$img .png).txt" 2>/dev/null || \
-			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/output/$$(basename $$img .jpg).txt" 2>/dev/null || \
-			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/output/$$(basename $$img .jpeg).txt" 2>/dev/null; \
+			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/data/$$(basename $$img .png).txt" 2>/dev/null || \
+			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/data/$$(basename $$img .jpg).txt" 2>/dev/null || \
+			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/data/$$(basename $$img .jpeg).txt" 2>/dev/null; \
 		fi; \
 	done
 	@echo "$(GREEN)✓ Batch processing complete$(NC)"
 
 batch-excalidraw:
-	@echo "$(GREEN)Batch processing all Excalidraw files in ./input/...$(NC)"
-	$(DOCKER_COMPOSE) run --rm excalidraw python excalidraw_ocr.py /input/
+	@echo "$(GREEN)Batch processing all Excalidraw files in ./data/...$(NC)"
+	$(DOCKER_COMPOSE) run --rm excalidraw python excalidraw_ocr.py /data/
 	@echo "$(GREEN)✓ Batch processing complete$(NC)"
 
 # Watch mode targets

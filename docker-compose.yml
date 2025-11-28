@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   # One-shot OCR service (general images)
-  # Usage: docker compose run --rm ocr python ocr.py /input/image.png -o /output/text.txt
+  # Usage: docker compose run --rm ocr python ocr.py /data/image.png -o /data/text.txt
   ocr:
     build:
       context: .
@@ -12,10 +12,8 @@ services:
     
     # Mount volumes for input/output
     volumes:
-      # Mount input directory (read-only for security)
-      - ./input:/input:ro
-      # Mount output directory
-      - ./output:/output
+      # Mount data directory (read-write for input and output)
+      - ./data:/data
       # Mount .env file securely (read-only)
       - ./.env:/app/.env:ro
       # Persist logs
@@ -65,7 +63,7 @@ services:
     tty: true
 
   # Excalidraw one-shot service
-  # Usage: docker compose run --rm excalidraw python excalidraw_ocr.py /input/drawing.excalidraw.md -o /output/text.md
+  # Usage: docker compose run --rm excalidraw python excalidraw_ocr.py /data/drawing.excalidraw.md
   excalidraw:
     build:
       context: .
@@ -74,8 +72,7 @@ services:
     container_name: excalidraw-oneshot
     
     volumes:
-      - ./input:/input:ro
-      - ./output:/output
+      - ./data:/data
       - ./.env:/app/.env:ro
       - ocr-logs:/home/ocruser/.ocr/logs
     

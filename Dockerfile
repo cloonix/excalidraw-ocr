@@ -64,8 +64,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --chown=ocruser:ocruser *.py *.js package.json ./
 
 # Create mount points
-RUN mkdir -p /input /output && \
-    chown ocruser:ocruser /input /output
+RUN mkdir -p /data && \
+    chown ocruser:ocruser /data
 
 # Switch to non-root user
 USER ocruser

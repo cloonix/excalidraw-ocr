@@ -141,7 +141,7 @@ make setup        # Creates directories and .env file
 make build        # Build Docker image
 
 # 2. Run one-shot OCR on an image
-make ocr IMAGE=/input/handwriting.jpg
+make ocr IMAGE=/data/handwriting.jpg
 
 # 3. Or start watch mode for continuous Excalidraw processing
 make watch-start  # Monitors ./watch folder
@@ -151,15 +151,15 @@ make watch-start  # Monitors ./watch folder
 
 **One-Shot OCR (General Images)**
 ```bash
-# Place images in ./input folder
-make ocr IMAGE=/input/photo.png
-make ocr IMAGE=/input/document.jpg OUTPUT=/output/result.txt
+# Place images in ./data folder
+make ocr IMAGE=/data/photo.png
+make ocr IMAGE=/data/document.jpg OUTPUT=/data/result.txt
 ```
 
 **One-Shot Excalidraw**
 ```bash
-# Place .excalidraw.md files in ./input folder
-make excalidraw FILE=/input/drawing.excalidraw.md
+# Place .excalidraw.md files in ./data folder
+make excalidraw FILE=/data/drawing.excalidraw.md
 ```
 
 **Watch Mode (Continuous)**
@@ -174,10 +174,10 @@ make watch-stop   # Stop watch mode
 
 ```bash
 # One-shot image OCR
-docker compose run --rm ocr python ocr.py /input/image.png -o /output/text.txt
+docker compose run --rm ocr python ocr.py /data/image.png -o /data/text.txt
 
 # One-shot Excalidraw
-docker compose run --rm excalidraw python excalidraw_ocr.py /input/drawing.excalidraw.md
+docker compose run --rm excalidraw python excalidraw_ocr.py /data/drawing.excalidraw.md
 
 # Watch mode (background service)
 docker compose up -d watch
