@@ -533,7 +533,7 @@ class ExcalidrawWatcher(FileSystemEventHandler):
             size1 = path.stat().st_size
             time.sleep(WATCH_FILE_STABILITY_MS / 1000.0)
             size2 = path.stat().st_size
-            return size1 == size2
+            return size1 == size2 and size2 > 0  # File must be stable AND non-empty
         except (FileNotFoundError, PermissionError):
             return False
     
@@ -597,18 +597,23 @@ class ExcalidrawWatcher(FileSystemEventHandler):
             return
         
         path_str = event.src_path
+        
         if not self.should_process(path_str):
             return
         
         path = Path(path_str)
         logger.info(f"Detected new file: {path.name}")
         
-        # Wait for file to stabilize
-        if not self.check_file_stable(path):
-            logger.warning(f"File unstable, skipping: {path.name}")
-            return
+        # Wait for file to stabilize (file might be created empty then written to)
+        # Try multiple times with increasing delays
+        for attempt in range(3):
+            time.sleep(0.1 * (attempt + 1))  # 0.1s, 0.2s, 0.3s
+            if self.check_file_stable(path):
+                self.process_file(path)
+                return
         
-        self.process_file(path)
+        # If still unstable after retries, log warning
+        logger.warning(f"File unstable after retries: {path.name}")
     
     def on_modified(self, event: FileSystemEvent) -> None:
         """Handle file modification events."""
@@ -616,6 +621,7 @@ class ExcalidrawWatcher(FileSystemEventHandler):
             return
         
         path_str = event.src_path
+        
         if not self.should_process(path_str):
             return
         
