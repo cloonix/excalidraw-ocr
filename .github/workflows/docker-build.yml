@@ -1,0 +1,74 @@
+name: Docker Build & Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ocr-app:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Test Python installation
+        run: |
+          docker run --rm ocr-app:test python --version
+      
+      - name: Test Node.js installation
+        run: |
+          docker run --rm ocr-app:test node --version
+      
+      - name: Test cairosvg import
+        run: |
+          docker run --rm ocr-app:test python -c "import cairosvg; print('✓ cairosvg OK')"
+      
+      - name: Test lz-string
+        run: |
+          docker run --rm ocr-app:test node -e "const lz = require('lz-string'); console.log('✓ lz-string OK')"
+      
+      - name: Test OCR help command
+        run: |
+          docker run --rm ocr-app:test python ocr.py --help
+      
+      - name: Test Excalidraw OCR help command
+        run: |
+          docker run --rm ocr-app:test python excalidraw_ocr.py --help
+      
+      - name: Run Trivy security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ocr-app:test
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Run Trivy security scan (table output)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ocr-app:test
+          format: 'table'
+          severity: 'CRITICAL,HIGH'

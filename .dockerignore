@@ -48,6 +48,9 @@ Thumbs.db
 *.svg
 output/
 input/
+data/
+watch/
+notes/
 *.txt
 !requirements.txt
 
@@ -75,3 +78,9 @@ logs/
 *.tmp
 *.temp
 .cache/
+
+# Issue tracker
+.beads/
+
+# CI/CD files
+.github/workflows/

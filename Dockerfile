@@ -34,6 +34,16 @@ RUN npm ci --only=production
 # Stage 2: Runtime stage (smaller final image)
 FROM python:3.11-slim
 
+# OCI Labels for metadata
+LABEL org.opencontainers.image.title="AI-Powered OCR"
+LABEL org.opencontainers.image.description="Extract text from handwritten images and Excalidraw drawings using AI vision models"
+LABEL org.opencontainers.image.authors="OCR Project Contributors"
+LABEL org.opencontainers.image.url="https://github.com/claus/ocr"
+LABEL org.opencontainers.image.source="https://github.com/claus/ocr"
+LABEL org.opencontainers.image.documentation="https://github.com/claus/ocr#readme"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.vendor="OCR Project"
+
 # Install only runtime dependencies
 RUN apt-get update && apt-get install -y \
     libcairo2 \

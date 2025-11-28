@@ -1,6 +1,12 @@
 # AI-Powered OCR with OpenRouter
 
+[![Docker Build](https://github.com/claus/ocr/actions/workflows/docker-build.yml/badge.svg)](https://github.com/claus/ocr/actions/workflows/docker-build.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker Pulls](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/claus/ocr/pkgs/container/ocr)
+
 Extract text from handwritten images using AI vision models via OpenRouter API.
+
+> **🚀 Quick Start with Docker**: `docker pull ghcr.io/claus/ocr:latest` - No installation required!
 
 ## Features
 
@@ -131,9 +137,48 @@ python ocr.py handwriting.jpg --model anthropic/claude-3.5-sonnet
 
 ## Docker Usage
 
-Run OCR in a containerized environment without installing dependencies locally. The unified `docker-compose.yml` supports three modes:
+Run OCR in a containerized environment without installing dependencies locally.
 
-### Quick Start with Docker
+### Quick Start with Pre-built Image
+
+**No build required** - use the pre-built multi-architecture image:
+
+```bash
+# Pull the latest image (supports linux/amd64 and linux/arm64)
+docker pull ghcr.io/claus/ocr:latest
+
+# Run one-shot OCR
+docker run --rm -v ./data:/data \
+  -e OPENAI_API_KEY=your_key_here \
+  ghcr.io/claus/ocr:latest \
+  python ocr.py /data/image.png
+
+# Run Excalidraw OCR
+docker run --rm -v ./data:/data \
+  -e OPENAI_API_KEY=your_key_here \
+  ghcr.io/claus/ocr:latest \
+  python excalidraw_ocr.py /data/drawing.excalidraw.md
+
+# Start watch mode
+docker run -d --name ocr-watch \
+  -v ./watch:/watch \
+  -e OPENAI_API_KEY=your_key_here \
+  ghcr.io/claus/ocr:latest \
+  python excalidraw_ocr.py /watch -w
+```
+
+**Available tags:**
+- `latest` - Latest stable release
+- `v1.0.0`, `v1.0`, `v1` - Semantic version tags
+- Works on: x86_64 (amd64) and ARM64 (Raspberry Pi, Apple Silicon, AWS Graviton)
+
+---
+
+### Build from Source
+
+The unified `docker-compose.yml` supports three modes:
+
+### Quick Start (Build Locally)
 
 ```bash
 # 1. Setup

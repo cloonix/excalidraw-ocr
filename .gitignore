@@ -39,6 +39,8 @@ result.txt
 # Docker volumes and generated files
 input/
 output/
+data/
+watch/
 
 # Test images (optional - uncomment if you don't want to commit test images)
 # *.png
