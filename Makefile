@@ -1,6 +1,6 @@
 .PHONY: build run shell test clean help logs ocr excalidraw stop watch-build watch-start watch-stop watch-restart watch-logs watch-status watch-clean watch-shell
 
-IMAGE_NAME := ocr-app
+IMAGE_NAME := excalidraw-ocr
 CONTAINER_NAME := ocr-container
 
 # Docker Compose command (auto-detect v1 or v2)

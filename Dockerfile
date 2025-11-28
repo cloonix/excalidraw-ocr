@@ -38,9 +38,9 @@ FROM python:3.11-slim
 LABEL org.opencontainers.image.title="AI-Powered OCR"
 LABEL org.opencontainers.image.description="Extract text from handwritten images and Excalidraw drawings using AI vision models"
 LABEL org.opencontainers.image.authors="OCR Project Contributors"
-LABEL org.opencontainers.image.url="https://github.com/claus/ocr"
-LABEL org.opencontainers.image.source="https://github.com/claus/ocr"
-LABEL org.opencontainers.image.documentation="https://github.com/claus/ocr#readme"
+LABEL org.opencontainers.image.url="https://github.com/cloonix/excalidraw-ocr"
+LABEL org.opencontainers.image.source="https://github.com/cloonix/excalidraw-ocr"
+LABEL org.opencontainers.image.documentation="https://github.com/cloonix/excalidraw-ocr#readme"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.vendor="OCR Project"
 

@@ -29,7 +29,7 @@ Deploy the OCR application on your Synology NAS using Container Manager (formerl
 
 1. Open **Container Manager**
 2. Go to **Registry**
-3. Search for `ghcr.io/claus/ocr`
+3. Search for `ghcr.io/cloonix/excalidraw-ocr`
 4. Double-click to download
 5. Select tag `latest`
 6. Click **Download**
@@ -40,7 +40,7 @@ Deploy the OCR application on your Synology NAS using Container Manager (formerl
 
 1. Go to **Container** tab
 2. Click **Create** → **Create Container**
-3. Select `ghcr.io/claus/ocr:latest`
+3. Select `ghcr.io/cloonix/excalidraw-ocr:latest`
 4. Click **Advanced Settings**
 
 **General Settings:**
@@ -244,7 +244,7 @@ If you prefer `docker-compose.yml` via SSH:
    version: '3.8'
    services:
      ocr:
-       image: ghcr.io/claus/ocr:latest
+       image: ghcr.io/cloonix/excalidraw-ocr:latest
        container_name: ocr-oneshot
        volumes:
          - ./data:/data
@@ -288,21 +288,21 @@ For multiple files:
 To update to the latest version:
 
 1. Container Manager → Registry
-2. Download new version of `ghcr.io/claus/ocr:latest`
+2. Download new version of `ghcr.io/cloonix/excalidraw-ocr:latest`
 3. Stop running containers
 4. Recreate containers with new image
 5. Start containers
 
 Alternatively:
 ```bash
-docker pull ghcr.io/claus/ocr:latest
+docker pull ghcr.io/cloonix/excalidraw-ocr:latest
 docker restart ocr-watch
 ```
 
 ## Support
 
-- **Issues**: https://github.com/claus/ocr/issues
-- **Documentation**: https://github.com/claus/ocr
+- **Issues**: https://github.com/cloonix/excalidraw-ocr/issues
+- **Documentation**: https://github.com/cloonix/excalidraw-ocr
 - **Synology Forum**: Search for "OCR Docker"
 
 ---

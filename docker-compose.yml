@@ -7,7 +7,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ocr-app:latest
+    image: excalidraw-ocr:latest
     container_name: ocr-container
 
     # Mount volumes for input/output
@@ -68,7 +68,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ocr-app:latest
+    image: excalidraw-ocr:latest
     container_name: excalidraw-oneshot
 
     volumes:
@@ -112,7 +112,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ocr-app:latest
+    image: excalidraw-ocr:latest
     container_name: excalidraw-watch
 
     # Watch mode command

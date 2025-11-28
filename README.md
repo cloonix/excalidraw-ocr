@@ -1,12 +1,12 @@
 # AI-Powered OCR with OpenRouter
 
-[![Docker Build](https://github.com/claus/ocr/actions/workflows/docker-build.yml/badge.svg)](https://github.com/claus/ocr/actions/workflows/docker-build.yml)
+[![Docker Build](https://github.com/cloonix/excalidraw-ocr/actions/workflows/docker-build.yml/badge.svg)](https://github.com/cloonix/excalidraw-ocr/actions/workflows/docker-build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docker Pulls](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/claus/ocr/pkgs/container/ocr)
+[![Docker Pulls](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/cloonix/excalidraw-ocr/pkgs/container/ocr)
 
 Extract text from handwritten images using AI vision models via OpenRouter API.
 
-> **🚀 Quick Start with Docker**: `docker pull ghcr.io/claus/ocr:latest` - No installation required!
+> **🚀 Quick Start with Docker**: `docker pull ghcr.io/cloonix/excalidraw-ocr:latest` - No installation required!
 
 ## Features
 
@@ -145,25 +145,25 @@ Run OCR in a containerized environment without installing dependencies locally.
 
 ```bash
 # Pull the latest image (supports linux/amd64 and linux/arm64)
-docker pull ghcr.io/claus/ocr:latest
+docker pull ghcr.io/cloonix/excalidraw-ocr:latest
 
 # Run one-shot OCR
 docker run --rm -v ./data:/data \
   -e OPENAI_API_KEY=your_key_here \
-  ghcr.io/claus/ocr:latest \
+  ghcr.io/cloonix/excalidraw-ocr:latest \
   python ocr.py /data/image.png
 
 # Run Excalidraw OCR
 docker run --rm -v ./data:/data \
   -e OPENAI_API_KEY=your_key_here \
-  ghcr.io/claus/ocr:latest \
+  ghcr.io/cloonix/excalidraw-ocr:latest \
   python excalidraw_ocr.py /data/drawing.excalidraw.md
 
 # Start watch mode
 docker run -d --name ocr-watch \
   -v ./watch:/watch \
   -e OPENAI_API_KEY=your_key_here \
-  ghcr.io/claus/ocr:latest \
+  ghcr.io/cloonix/excalidraw-ocr:latest \
   python excalidraw_ocr.py /watch -w
 ```
 

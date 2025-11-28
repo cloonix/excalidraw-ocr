@@ -24,38 +24,38 @@ jobs:
           context: .
           push: false
           load: true
-          tags: ocr-app:test
+          tags: excalidraw-ocr:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
       - name: Test Python installation
         run: |
-          docker run --rm ocr-app:test python --version
+          docker run --rm excalidraw-ocr:test python --version
       
       - name: Test Node.js installation
         run: |
-          docker run --rm ocr-app:test node --version
+          docker run --rm excalidraw-ocr:test node --version
       
       - name: Test cairosvg import
         run: |
-          docker run --rm ocr-app:test python -c "import cairosvg; print('✓ cairosvg OK')"
+          docker run --rm excalidraw-ocr:test python -c "import cairosvg; print('✓ cairosvg OK')"
       
       - name: Test lz-string
         run: |
-          docker run --rm ocr-app:test node -e "const lz = require('lz-string'); console.log('✓ lz-string OK')"
+          docker run --rm excalidraw-ocr:test node -e "const lz = require('lz-string'); console.log('✓ lz-string OK')"
       
       - name: Test OCR help command
         run: |
-          docker run --rm ocr-app:test python ocr.py --help
+          docker run --rm excalidraw-ocr:test python ocr.py --help
       
       - name: Test Excalidraw OCR help command
         run: |
-          docker run --rm ocr-app:test python excalidraw_ocr.py --help
+          docker run --rm excalidraw-ocr:test python excalidraw_ocr.py --help
       
       - name: Run Trivy security scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ocr-app:test
+          image-ref: excalidraw-ocr:test
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
@@ -69,6 +69,6 @@ jobs:
       - name: Run Trivy security scan (table output)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ocr-app:test
+          image-ref: excalidraw-ocr:test
           format: 'table'
           severity: 'CRITICAL,HIGH'
