@@ -8,10 +8,10 @@ Requires cairo system libraries - run ./install_cairo.sh first.
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import signal
-import subprocess
 import sys
 import threading
 import time
@@ -31,10 +31,17 @@ from ocr_lib import (
 )
 from PIL import Image
 
+# Import lzstring for decompression
+try:
+    import lzstring
+    HAS_LZSTRING = True
+except ImportError:
+    HAS_LZSTRING = False
+
 # Configuration constants
 SVG_RENDER_SCALE = 2  # 2x scale for better OCR accuracy
-NODE_RENDER_TIMEOUT = 30  # Seconds
-NPM_INSTALL_TIMEOUT = 120  # Seconds
+MAX_ELEMENTS = 10000  # Maximum elements in Excalidraw to prevent DoS
+MAX_DECOMPRESSED_SIZE_MB = 50  # Maximum decompressed JSON size
 
 # Watch mode configuration
 WATCH_DEBOUNCE_SECONDS = 1.0  # Minimum time between processing same file
@@ -214,9 +221,240 @@ def extract_compressed_data(excalidraw_file_path: Path) -> str:
         raise Exception(f"Failed to extract compressed data: {str(e)}")
 
 
+def decompress_excalidraw(compressed_data: str) -> dict:
+    """
+    Decompress base64-compressed Excalidraw JSON data using Python lzstring.
+    
+    Args:
+        compressed_data: Base64-compressed Excalidraw JSON data
+    
+    Returns:
+        Decompressed Excalidraw data as dict
+    
+    Raises:
+        Exception: If decompression fails or data is invalid
+    """
+    if not HAS_LZSTRING:
+        raise ImportError(
+            "lzstring package not found. Install it with:\n"
+            "  pip install lzstring"
+        )
+    
+    try:
+        # Decompress using lzstring
+        decompressed = lzstring.LZString().decompressFromBase64(compressed_data)
+        
+        if not decompressed:
+            raise ValueError("Decompression failed - no data returned")
+        
+        # Parse JSON
+        excalidraw_data = json.loads(decompressed)
+        
+        # Validate structure
+        if not isinstance(excalidraw_data, dict):
+            raise ValueError("Invalid Excalidraw data structure")
+        
+        if not isinstance(excalidraw_data.get('elements'), list):
+            raise ValueError("Excalidraw data missing elements array")
+        
+        # Size limits
+        json_size = len(decompressed)
+        max_size = MAX_DECOMPRESSED_SIZE_MB * 1024 * 1024
+        if json_size > max_size:
+            raise ValueError(
+                f"Decompressed data too large: {json_size / 1024 / 1024:.2f}MB "
+                f"(max: {MAX_DECOMPRESSED_SIZE_MB}MB)"
+            )
+        
+        # Element count limit
+        if len(excalidraw_data['elements']) > MAX_ELEMENTS:
+            raise ValueError(
+                f"Too many elements: {len(excalidraw_data['elements'])} "
+                f"(max: {MAX_ELEMENTS})"
+            )
+        
+        return excalidraw_data
+        
+    except json.JSONDecodeError as e:
+        raise Exception(f"Failed to parse decompressed JSON: {str(e)}")
+    except Exception as e:
+        raise Exception(f"Failed to decompress Excalidraw data: {str(e)}")
+
+
+def escape_xml(text: str) -> str:
+    """Escape special XML characters."""
+    return (text
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+        .replace("'", '&apos;'))
+
+
+def create_svg_from_excalidraw(excalidraw_data: dict) -> tuple[str, int, int, int]:
+    """
+    Generate SVG from Excalidraw JSON data (Python implementation).
+    
+    Args:
+        excalidraw_data: Decompressed Excalidraw data dict
+    
+    Returns:
+        Tuple of (svg_string, width, height, element_count)
+    """
+    elements = excalidraw_data.get('elements', [])
+    
+    if not elements:
+        raise ValueError("No elements found in Excalidraw data")
+    
+    # Calculate bounding box
+    min_x = min_y = float('inf')
+    max_x = max_y = float('-inf')
+    
+    for element in elements:
+        if element.get('isDeleted'):
+            continue
+        
+        x = element.get('x')
+        y = element.get('y')
+        if x is not None and y is not None:
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x + element.get('width', 0))
+            max_y = max(max_y, y + element.get('height', 0))
+    
+    # Add padding
+    padding = 40
+    min_x -= padding
+    min_y -= padding
+    max_x += padding
+    max_y += padding
+    
+    width = int(max_x - min_x)
+    height = int(max_y - min_y)
+    
+    # Start SVG
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}">',
+        f'<rect width="{width}" height="{height}" fill="white"/>',
+        '<g>'
+    ]
+    
+    # Render each element
+    element_count = 0
+    for element in elements:
+        if element.get('isDeleted'):
+            continue
+        
+        element_count += 1
+        elem_type = element.get('type')
+        x = element.get('x', 0) - min_x
+        y = element.get('y', 0) - min_y
+        stroke_color = element.get('strokeColor', '#000000')
+        fill_color = 'none' if element.get('backgroundColor') == 'transparent' else element.get('backgroundColor', 'none')
+        stroke_width = element.get('strokeWidth', 1)
+        opacity = element.get('opacity', 100) / 100
+        
+        # Stroke style
+        stroke_dasharray = ''
+        if element.get('strokeStyle') == 'dashed':
+            stroke_dasharray = ' stroke-dasharray="12,8"'
+        elif element.get('strokeStyle') == 'dotted':
+            stroke_dasharray = ' stroke-dasharray="2,6"'
+        
+        # Render by type
+        if elem_type == 'freedraw':
+            points = element.get('points', [])
+            if len(points) > 1:
+                path = f'M {x + points[0][0]} {y + points[0][1]}'
+                for px, py in points[1:]:
+                    path += f' L {x + px} {y + py}'
+                svg_parts.append(
+                    f'<path d="{path}" stroke="{stroke_color}" stroke-width="{stroke_width}" '
+                    f'fill="none" opacity="{opacity}"{stroke_dasharray}/>'
+                )
+        
+        elif elem_type in ('line', 'arrow'):
+            points = element.get('points', [])
+            if len(points) > 1:
+                path = f'M {x + points[0][0]} {y + points[0][1]}'
+                for px, py in points[1:]:
+                    path += f' L {x + px} {y + py}'
+                svg_parts.append(
+                    f'<path d="{path}" stroke="{stroke_color}" stroke-width="{stroke_width}" '
+                    f'fill="none" opacity="{opacity}"{stroke_dasharray}/>'
+                )
+                
+                # Arrow head
+                if elem_type == 'arrow' and len(points) >= 2:
+                    p1 = points[-2]
+                    p2 = points[-1]
+                    angle = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
+                    arrow_length = 15
+                    arrow_angle = math.pi / 6
+                    
+                    x2 = x + p2[0]
+                    y2 = y + p2[1]
+                    
+                    arrow_path = (
+                        f'M {x2} {y2} '
+                        f'L {x2 - arrow_length * math.cos(angle - arrow_angle)} '
+                        f'{y2 - arrow_length * math.sin(angle - arrow_angle)} '
+                        f'M {x2} {y2} '
+                        f'L {x2 - arrow_length * math.cos(angle + arrow_angle)} '
+                        f'{y2 - arrow_length * math.sin(angle + arrow_angle)}'
+                    )
+                    svg_parts.append(
+                        f'<path d="{arrow_path}" stroke="{stroke_color}" '
+                        f'stroke-width="{stroke_width}" fill="none" opacity="{opacity}"/>'
+                    )
+        
+        elif elem_type == 'rectangle':
+            elem_width = element.get('width', 0)
+            elem_height = element.get('height', 0)
+            svg_parts.append(
+                f'<rect x="{x}" y="{y}" width="{elem_width}" height="{elem_height}" '
+                f'stroke="{stroke_color}" stroke-width="{stroke_width}" fill="{fill_color}" '
+                f'opacity="{opacity}"{stroke_dasharray}/>'
+            )
+        
+        elif elem_type == 'ellipse':
+            elem_width = element.get('width', 0)
+            elem_height = element.get('height', 0)
+            cx = x + elem_width / 2
+            cy = y + elem_height / 2
+            rx = elem_width / 2
+            ry = elem_height / 2
+            svg_parts.append(
+                f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" '
+                f'stroke="{stroke_color}" stroke-width="{stroke_width}" fill="{fill_color}" '
+                f'opacity="{opacity}"{stroke_dasharray}/>'
+            )
+        
+        elif elem_type == 'text':
+            text = element.get('text', '')
+            if text:
+                font_size = element.get('fontSize', 20)
+                font_family = element.get('fontFamily', 'Arial, sans-serif')
+                lines = text.split('\n')
+                line_height = font_size * 1.2
+                
+                for i, line in enumerate(lines):
+                    text_y = y + font_size + (i * line_height)
+                    svg_parts.append(
+                        f'<text x="{x}" y="{text_y}" font-size="{font_size}" '
+                        f'font-family="{font_family}" fill="{stroke_color}" '
+                        f'opacity="{opacity}">{escape_xml(line)}</text>'
+                    )
+    
+    svg_parts.append('</g></svg>')
+    
+    return ''.join(svg_parts), width, height, element_count
+
+
 def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict:
     """
-    Call Node.js script to render Excalidraw to SVG.
+    Decompress and render Excalidraw to SVG using Python (no Node.js required).
     
     Args:
         compressed_data: Base64-compressed Excalidraw JSON data
@@ -226,48 +464,31 @@ def render_excalidraw_to_svg(compressed_data: str, output_svg_path: str) -> dict
         Dict with render info (width, height, elementCount, success, outputPath)
     
     Raises:
-        FileNotFoundError: If renderer script or Node.js not found
-        Exception: If rendering fails or times out
+        Exception: If rendering fails
     """
-    script_dir = Path(__file__).parent
-    renderer_script = script_dir / "excalidraw_renderer.js"
-    
-    if not renderer_script.exists():
-        raise FileNotFoundError(f"Renderer script not found: {renderer_script}")
-    
-    # Validate SVG output path for security (allow temp directory for temporary files)
+    # Validate SVG output path for security
     safe_svg_path = validate_output_path(output_svg_path, allow_temp=True)
     logger.info(f"Rendering Excalidraw to SVG: {safe_svg_path.name}")
     
     try:
-        # Call Node.js renderer, passing data via stdin
-        result = subprocess.run(
-            ['node', str(renderer_script), str(safe_svg_path)],
-            input=compressed_data,
-            capture_output=True,
-            text=True,
-            timeout=NODE_RENDER_TIMEOUT
-        )
+        # Decompress Excalidraw data
+        excalidraw_data = decompress_excalidraw(compressed_data)
         
-        if result.returncode != 0:
-            error_msg = result.stderr or result.stdout
-            try:
-                error_data = json.loads(error_msg)
-                raise Exception(error_data.get('error', 'Unknown rendering error'))
-            except json.JSONDecodeError:
-                raise Exception(f"Rendering failed: {error_msg}")
+        # Generate SVG
+        svg, width, height, element_count = create_svg_from_excalidraw(excalidraw_data)
         
-        # Parse success output
-        output_data = json.loads(result.stdout)
-        return output_data
+        # Write SVG to file
+        with open(safe_svg_path, 'w', encoding='utf-8') as f:
+            f.write(svg)
         
-    except subprocess.TimeoutExpired:
-        raise Exception(f"Rendering timed out after {NODE_RENDER_TIMEOUT} seconds")
-    except FileNotFoundError:
-        raise Exception(
-            "Node.js not found. Please ensure Node.js is installed.\n"
-            "Install from: https://nodejs.org/"
-        )
+        return {
+            'success': True,
+            'width': width,
+            'height': height,
+            'elementCount': element_count,
+            'outputPath': str(safe_svg_path)
+        }
+        
     except Exception as e:
         raise Exception(f"Failed to render Excalidraw: {str(e)}")
 
@@ -301,39 +522,6 @@ def svg_to_png(svg_path: str, png_path: str):
         cairosvg.svg2png(url=svg_path, write_to=png_path, scale=SVG_RENDER_SCALE)
     except Exception as e:
         raise Exception(f"Failed to convert SVG to PNG: {str(e)}")
-
-
-def check_node_dependencies():
-    """
-    Check if required Node.js dependencies are installed, install if missing.
-    
-    Raises:
-        Exception: If npm not found or installation fails
-    """
-    script_dir = Path(__file__).parent
-    node_modules = script_dir / "node_modules"
-    
-    if not node_modules.exists():
-        print("Installing Node.js dependencies...", file=sys.stderr)
-        try:
-            subprocess.run(
-                ['npm', 'install'],
-                cwd=script_dir,
-                capture_output=True,
-                check=True,
-                timeout=NPM_INSTALL_TIMEOUT
-            )
-            print("✓ Node.js dependencies installed", file=sys.stderr)
-        except subprocess.CalledProcessError as e:
-            raise Exception(
-                f"Failed to install Node.js dependencies: {e.stderr.decode()}\n"
-                f"Try running manually: cd {script_dir} && npm install"
-            )
-        except FileNotFoundError:
-            raise Exception(
-                "npm not found. Please ensure Node.js and npm are installed.\n"
-                "Install from: https://nodejs.org/"
-            )
 
 
 def process_excalidraw_file(
@@ -392,9 +580,6 @@ def process_excalidraw_file(
             return ''.join(content).strip(), False, content_hash
     
     print(f"Processing: {excalidraw_path.name} ({reason})", file=sys.stderr)
-    
-    # Check Node.js dependencies
-    check_node_dependencies()
     
     # Use context managers for automatic temp file cleanup
     print("Rendering to SVG...", file=sys.stderr)
