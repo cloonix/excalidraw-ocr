@@ -1,6 +1,8 @@
 version: '3.8'
 
 services:
+  # One-shot OCR service (general images)
+  # Usage: docker compose run --rm ocr python ocr.py /input/image.png -o /output/text.txt
   ocr:
     build:
       context: .
@@ -19,8 +21,9 @@ services:
       # Persist logs
       - ocr-logs:/home/ocruser/.ocr/logs
     
-    # Set environment variables (alternative to .env file)
-    # Can be overridden with .env file in project root
+    # Set environment variables
+    env_file:
+      - .env
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-flash-1.5}
@@ -61,6 +64,134 @@ services:
     stdin_open: true
     tty: true
 
+  # Excalidraw one-shot service
+  # Usage: docker compose run --rm excalidraw python excalidraw_ocr.py /input/drawing.excalidraw.md -o /output/text.md
+  excalidraw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ocr-app:latest
+    container_name: excalidraw-oneshot
+    
+    volumes:
+      - ./input:/input:ro
+      - ./output:/output
+      - ./.env:/app/.env:ro
+      - ocr-logs:/home/ocruser/.ocr/logs
+    
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEBUG=${DEBUG:-}
+    
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:size=1G,mode=1777
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    user: "1000:1000"
+    network_mode: bridge
+    restart: "no"
+    
+    command: ["python", "excalidraw_ocr.py", "--help"]
+    
+    stdin_open: true
+    tty: true
+
+  # Watch mode service (continuous monitoring)
+  # Usage: docker compose up -d watch
+  watch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ocr-app:latest
+    container_name: excalidraw-watch
+    
+    # Watch mode command
+    command: ["python", "excalidraw_ocr.py", "/watch", "-w"]
+
+    # Volumes
+    volumes:
+      # Watch directory (read-write for outputs)
+      - ./watch:/watch
+      # Environment file (read-only)
+      - ./.env:/app/.env:ro
+      # Persistent logs
+      - watch-logs:/home/ocruser/.ocr/logs
+
+    # Environment variables
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEBUG=${DEBUG:-}
+
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    read_only: false # Need write for temp files
+    tmpfs:
+      # Temporary filesystem for secure temp file handling
+      - /tmp:size=1G,mode=1777
+
+    # Resource limits (increased for watch mode)
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 3G
+        reservations:
+          cpus: "1"
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+    # File descriptor limits
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    # User (non-root)
+    user: "1000:1000"
+
+    # Network
+    network_mode: bridge
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python.*excalidraw_ocr.py.*-w' || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 2
+      start_period: 30s
+
 volumes:
   ocr-logs:
+    driver: local
+  watch-logs:
     driver: local

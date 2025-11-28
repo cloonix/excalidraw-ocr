@@ -2,6 +2,8 @@
 
 Continuous monitoring and automatic processing of Excalidraw files using Docker.
 
+> **Note**: This project uses a unified `docker-compose.yml` that supports both one-shot OCR processing and continuous watch mode. You can run different services using the same configuration file.
+
 ## Quick Start (5 Minutes)
 
 ### 1. Setup

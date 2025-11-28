@@ -1,11 +1,10 @@
-.PHONY: build run shell test clean help logs ocr excalidraw stop watch-build watch-start watch-stop watch-restart watch-logs watch-status watch-clean
+.PHONY: build run shell test clean help logs ocr excalidraw stop watch-build watch-start watch-stop watch-restart watch-logs watch-status watch-clean watch-shell
 
 IMAGE_NAME := ocr-app
 CONTAINER_NAME := ocr-container
 
 # Docker Compose command (auto-detect v1 or v2)
 DOCKER_COMPOSE := $(shell command -v docker-compose 2>/dev/null && echo docker-compose || echo "docker compose")
-WATCH_COMPOSE := $(DOCKER_COMPOSE) -f docker-compose.watch.yml
 
 # Colors for output
 GREEN := \033[0;32m
@@ -33,6 +32,7 @@ help:
 	@echo "  make watch-restart- Restart watch mode"
 	@echo "  make watch-logs   - View watch mode logs"
 	@echo "  make watch-status - Show watch mode status"
+	@echo "  make watch-shell  - Open shell in running watch container"
 	@echo "  make watch-clean  - Remove watch mode container and volumes"
 	@echo ""
 	@echo "$(GREEN)Testing:$(NC)"
@@ -113,7 +113,7 @@ excalidraw:
 		echo "$(YELLOW)Usage: make excalidraw FILE=/input/drawing.excalidraw.md$(NC)"; \
 		exit 1; \
 	fi
-	$(DOCKER_COMPOSE) run --rm ocr python excalidraw_ocr.py $(FILE)
+	$(DOCKER_COMPOSE) run --rm excalidraw python excalidraw_ocr.py $(FILE)
 
 logs:
 	@echo "$(GREEN)Showing container logs...$(NC)"
@@ -158,13 +158,13 @@ batch-ocr:
 
 batch-excalidraw:
 	@echo "$(GREEN)Batch processing all Excalidraw files in ./input/...$(NC)"
-	$(DOCKER_COMPOSE) run --rm ocr python excalidraw_ocr.py /input/
+	$(DOCKER_COMPOSE) run --rm excalidraw python excalidraw_ocr.py /input/
 	@echo "$(GREEN)✓ Batch processing complete$(NC)"
 
 # Watch mode targets
 watch-build:
 	@echo "$(GREEN)Building watch mode container...$(NC)"
-	$(WATCH_COMPOSE) build
+	$(DOCKER_COMPOSE) build watch
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
 watch-start:
@@ -173,30 +173,35 @@ watch-start:
 		mkdir -p watch; \
 		echo "$(YELLOW)Created ./watch directory$(NC)"; \
 	fi
-	$(WATCH_COMPOSE) up -d
+	$(DOCKER_COMPOSE) up -d watch
 	@echo "$(GREEN)✓ Watch mode started$(NC)"
 	@echo "$(BLUE)Monitor with: make watch-logs$(NC)"
 	@echo "$(BLUE)Place .excalidraw.md files in ./watch folder$(NC)"
 
 watch-stop:
 	@echo "$(GREEN)Stopping watch mode...$(NC)"
-	$(WATCH_COMPOSE) down
+	$(DOCKER_COMPOSE) stop watch
 	@echo "$(GREEN)✓ Watch mode stopped$(NC)"
 
 watch-restart:
 	@echo "$(GREEN)Restarting watch mode...$(NC)"
-	$(WATCH_COMPOSE) restart
+	$(DOCKER_COMPOSE) restart watch
 	@echo "$(GREEN)✓ Watch mode restarted$(NC)"
 
 watch-logs:
 	@echo "$(GREEN)Showing watch mode logs (Ctrl+C to exit)...$(NC)"
-	$(WATCH_COMPOSE) logs -f --tail=50
+	$(DOCKER_COMPOSE) logs -f --tail=50 watch
 
 watch-status:
 	@echo "$(GREEN)Watch mode status:$(NC)"
-	$(WATCH_COMPOSE) ps
+	$(DOCKER_COMPOSE) ps watch
 
 watch-clean:
 	@echo "$(YELLOW)Removing watch mode container and volumes...$(NC)"
-	$(WATCH_COMPOSE) down -v
+	$(DOCKER_COMPOSE) down watch
+	$(DOCKER_COMPOSE) volume rm ocr_watch-logs 2>/dev/null || true
 	@echo "$(GREEN)✓ Cleaned$(NC)"
+
+watch-shell:
+	@echo "$(GREEN)Opening shell in watch container...$(NC)"
+	$(DOCKER_COMPOSE) exec watch /bin/bash

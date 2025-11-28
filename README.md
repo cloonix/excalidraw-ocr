@@ -129,6 +129,74 @@ python ocr.py handwriting.jpg --model google/gemini-flash-1.5
 python ocr.py handwriting.jpg --model anthropic/claude-3.5-sonnet
 ```
 
+## Docker Usage
+
+Run OCR in a containerized environment without installing dependencies locally. The unified `docker-compose.yml` supports three modes:
+
+### Quick Start with Docker
+
+```bash
+# 1. Setup
+make setup        # Creates directories and .env file
+make build        # Build Docker image
+
+# 2. Run one-shot OCR on an image
+make ocr IMAGE=/input/handwriting.jpg
+
+# 3. Or start watch mode for continuous Excalidraw processing
+make watch-start  # Monitors ./watch folder
+```
+
+### Docker Modes
+
+**One-Shot OCR (General Images)**
+```bash
+# Place images in ./input folder
+make ocr IMAGE=/input/photo.png
+make ocr IMAGE=/input/document.jpg OUTPUT=/output/result.txt
+```
+
+**One-Shot Excalidraw**
+```bash
+# Place .excalidraw.md files in ./input folder
+make excalidraw FILE=/input/drawing.excalidraw.md
+```
+
+**Watch Mode (Continuous)**
+```bash
+# Automatically processes new .excalidraw.md files
+make watch-start  # Start monitoring ./watch folder
+make watch-logs   # View processing logs
+make watch-stop   # Stop watch mode
+```
+
+### Direct Docker Compose Commands
+
+```bash
+# One-shot image OCR
+docker compose run --rm ocr python ocr.py /input/image.png -o /output/text.txt
+
+# One-shot Excalidraw
+docker compose run --rm excalidraw python excalidraw_ocr.py /input/drawing.excalidraw.md
+
+# Watch mode (background service)
+docker compose up -d watch
+docker compose logs -f watch
+docker compose stop watch
+```
+
+### Docker Benefits
+
+- ✅ No local Python/Node.js installation required
+- ✅ Consistent environment across all platforms (Linux, macOS, Windows)
+- ✅ ARM64 support (Raspberry Pi, Apple Silicon, AWS Graviton)
+- ✅ Isolated dependencies and security
+- ✅ Easy cleanup and updates
+
+See [README-Docker.md](README-Docker.md) and [README-Docker-Watch.md](README-Docker-Watch.md) for detailed documentation.
+
+---
+
 ## Excalidraw OCR (NEW!)
 
 Extract text from Excalidraw drawings created in Obsidian or the Excalidraw app.
