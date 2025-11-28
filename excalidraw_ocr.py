@@ -10,8 +10,11 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 # Import OCR functions from shared library
@@ -33,12 +36,28 @@ SVG_RENDER_SCALE = 2  # 2x scale for better OCR accuracy
 NODE_RENDER_TIMEOUT = 30  # Seconds
 NPM_INSTALL_TIMEOUT = 120  # Seconds
 
+# Watch mode configuration
+WATCH_DEBOUNCE_SECONDS = 1.0  # Minimum time between processing same file
+WATCH_FILE_STABILITY_MS = 500  # Wait time to check file size stability
+WATCH_MAX_CONCURRENT = 3  # Maximum concurrent file processing
+WATCH_MAX_DEBOUNCE_ENTRIES = 1000  # Maximum debounce entries before cleanup
+WATCH_EXTENSIONS = {'.excalidraw.md', '.excalidraw'}  # File extensions to watch
+WATCH_IGNORE_PATTERNS = {'.swp', '~', '.tmp', '.bak'}  # Temp file patterns to ignore
+
 # Try to import cairosvg
 try:
     import cairosvg
     HAS_CAIROSVG = True
 except ImportError:
     HAS_CAIROSVG = False
+
+# Try to import watchdog for watch mode
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler, FileSystemEvent
+    HAS_WATCHDOG = True
+except ImportError:
+    HAS_WATCHDOG = False
 
 
 def get_content_hash(compressed_data: str) -> str:
@@ -407,6 +426,310 @@ def process_excalidraw_file(
         return extracted_text, True, content_hash
 
 
+class ExcalidrawWatcher(FileSystemEventHandler):
+    """
+    File system event handler for Excalidraw files.
+    
+    Monitors directory for new/modified .excalidraw.md files and processes
+    them with OCR. Includes debouncing, thread-safety, and security validation.
+    
+    Args:
+        model: OCR model to use (optional)
+        force: Force reprocessing even if cached
+        
+    Attributes:
+        processed_count: Number of files processed
+        cached_count: Number of files served from cache
+        error_count: Number of processing errors
+    """
+    
+    def __init__(self, model: str | None = None, force: bool = False) -> None:
+        super().__init__()
+        self.model = model
+        self.force = force
+        
+        # Thread-safe state
+        self.last_processed: dict[str, float] = {}
+        self.lock = threading.Lock()
+        self.processing_semaphore = threading.Semaphore(WATCH_MAX_CONCURRENT)
+        
+        # Statistics
+        self.processed_count = 0
+        self.cached_count = 0
+        self.error_count = 0
+    
+    def should_process(self, path: str) -> bool:
+        """
+        Check if file should be processed (security + debouncing).
+        
+        Args:
+            path: File path to check
+            
+        Returns:
+            True if file should be processed, False otherwise
+        """
+        try:
+            # Convert to Path for validation
+            file_path = Path(path)
+            
+            # Security: Validate path is safe
+            try:
+                safe_path = validate_output_path(file_path)
+            except ValueError as e:
+                logger.warning(f"Rejected unsafe path {path}: {e}")
+                return False
+            
+            # Security: Reject symlinks
+            if safe_path.is_symlink():
+                logger.warning(f"Ignoring symlink: {path}")
+                return False
+            
+            # Check extension
+            if not any(path.endswith(ext) for ext in WATCH_EXTENSIONS):
+                return False
+            
+            # Ignore temp/hidden files
+            filename = safe_path.name
+            if filename.startswith('.'):
+                return False
+            
+            if any(filename.endswith(pattern) for pattern in WATCH_IGNORE_PATTERNS):
+                return False
+            
+            # Debounce check (thread-safe)
+            with self.lock:
+                current_time = time.time()
+                last_time = self.last_processed.get(path, 0)
+                
+                if current_time - last_time < WATCH_DEBOUNCE_SECONDS:
+                    return False
+                
+                self.last_processed[path] = current_time
+                
+                # Prevent memory leak: clean old entries
+                if len(self.last_processed) > WATCH_MAX_DEBOUNCE_ENTRIES:
+                    self.last_processed = {
+                        k: v for k, v in self.last_processed.items()
+                        if current_time - v < 3600  # Keep last hour only
+                    }
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in should_process for {path}: {e}")
+            return False
+    
+    def check_file_stable(self, path: Path) -> bool:
+        """
+        Check if file has finished being written.
+        
+        Args:
+            path: Path to file
+            
+        Returns:
+            True if file size is stable, False otherwise
+        """
+        try:
+            size1 = path.stat().st_size
+            time.sleep(WATCH_FILE_STABILITY_MS / 1000.0)
+            size2 = path.stat().st_size
+            return size1 == size2
+        except (FileNotFoundError, PermissionError):
+            return False
+    
+    def process_file(self, path: Path) -> None:
+        """
+        Process an Excalidraw file with OCR.
+        
+        Args:
+            path: Path to Excalidraw file
+            
+        Note:
+            Handles errors gracefully and updates statistics.
+        """
+        # Limit concurrent processing
+        with self.processing_semaphore:
+            try:
+                # Check file still exists and is readable
+                if not path.exists():
+                    logger.warning(f"File disappeared: {path}")
+                    return
+                
+                timestamp = time.strftime("%H:%M:%S")
+                print(f"\n[{timestamp}] Processing: {path.name}", file=sys.stderr)
+                
+                # Process the file
+                extracted_text, was_processed, content_hash = process_excalidraw_file(
+                    path,
+                    output_path=None,
+                    model=self.model,
+                    force=self.force
+                )
+                
+                # Determine output file path
+                output_file = get_excalidraw_output_path(path, None)
+                
+                # Save with metadata if it was newly processed
+                if was_processed:
+                    save_with_metadata(output_file, extracted_text, content_hash, str(path))
+                    print(f"✓ Text saved to {output_file.name}", file=sys.stderr)
+                    self.processed_count += 1
+                else:
+                    print(f"✓ Using cached result: {output_file.name}", file=sys.stderr)
+                    self.cached_count += 1
+                
+            except FileNotFoundError:
+                logger.warning(f"File not found during processing: {path}")
+                print(f"✗ File not found: {path.name}", file=sys.stderr)
+                self.error_count += 1
+            except PermissionError:
+                logger.error(f"Permission denied: {path}")
+                print(f"✗ Permission denied: {path.name}", file=sys.stderr)
+                self.error_count += 1
+            except Exception as e:
+                logger.exception(f"Error processing {path.name}: {e}")
+                print(f"✗ Error processing {path.name}: {str(e)}", file=sys.stderr)
+                self.error_count += 1
+    
+    def on_created(self, event: FileSystemEvent) -> None:
+        """Handle file creation events."""
+        if event.is_directory:
+            return
+        
+        path_str = event.src_path
+        if not self.should_process(path_str):
+            return
+        
+        path = Path(path_str)
+        logger.info(f"Detected new file: {path.name}")
+        
+        # Wait for file to stabilize
+        if not self.check_file_stable(path):
+            logger.warning(f"File unstable, skipping: {path.name}")
+            return
+        
+        self.process_file(path)
+    
+    def on_modified(self, event: FileSystemEvent) -> None:
+        """Handle file modification events."""
+        if event.is_directory:
+            return
+        
+        path_str = event.src_path
+        if not self.should_process(path_str):
+            return
+        
+        path = Path(path_str)
+        logger.info(f"Detected modification: {path.name}")
+        
+        # Wait for file to stabilize
+        if not self.check_file_stable(path):
+            logger.warning(f"File unstable, skipping: {path.name}")
+            return
+        
+        self.process_file(path)
+    
+    def get_stats(self) -> dict[str, int]:
+        """Get processing statistics."""
+        return {
+            'processed': self.processed_count,
+            'cached': self.cached_count,
+            'errors': self.error_count,
+        }
+
+
+def watch_folder(
+    folder_path: Path,
+    model: str | None = None,
+    force: bool = False
+) -> None:
+    """
+    Watch a folder for Excalidraw file changes and process them automatically.
+    
+    Args:
+        folder_path: Path to folder to watch
+        model: OCR model to use (optional)
+        force: Force reprocessing even if cached
+        
+    Raises:
+        ImportError: If watchdog library is not installed
+    """
+    if not HAS_WATCHDOG:
+        raise ImportError(
+            "watchdog library is required for watch mode.\n"
+            "Install it with: pip install watchdog"
+        )
+    
+    print(f"Initializing watch mode for: {folder_path}", file=sys.stderr)
+    
+    # Initial scan: process all existing files
+    existing_files = sorted(folder_path.glob("*.excalidraw.md"))
+    if existing_files:
+        print(f"Processing {len(existing_files)} existing file(s)...\n", file=sys.stderr)
+        processed = 0
+        cached = 0
+        errors = 0
+        
+        for file_path in existing_files:
+            try:
+                extracted_text, was_processed, content_hash = process_excalidraw_file(
+                    file_path,
+                    output_path=None,
+                    model=model,
+                    force=force
+                )
+                
+                output_file = get_excalidraw_output_path(file_path, None)
+                
+                if was_processed:
+                    save_with_metadata(output_file, extracted_text, content_hash, str(file_path))
+                    print(f"✓ {file_path.name} → {output_file.name}", file=sys.stderr)
+                    processed += 1
+                else:
+                    print(f"✓ {file_path.name} (cached)", file=sys.stderr)
+                    cached += 1
+                    
+            except Exception as e:
+                print(f"✗ Error processing {file_path.name}: {str(e)}", file=sys.stderr)
+                logger.exception(f"Error in initial scan for {file_path}")
+                errors += 1
+        
+        print(f"\nInitial scan complete: {processed} processed, {cached} cached, {errors} errors", file=sys.stderr)
+    
+    # Set up file system observer
+    event_handler = ExcalidrawWatcher(model=model, force=force)
+    observer = Observer()
+    observer.schedule(event_handler, str(folder_path), recursive=False)
+    observer.start()
+    
+    print(f"\n👀 Watching {folder_path} for changes... (Ctrl+C to stop)\n", file=sys.stderr)
+    
+    # Set up signal handlers for graceful shutdown
+    shutdown_event = threading.Event()
+    
+    def signal_handler(signum, frame):
+        print("\n\nReceived shutdown signal...", file=sys.stderr)
+        shutdown_event.set()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        while not shutdown_event.is_set():
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    
+    print("Stopping watch mode...", file=sys.stderr)
+    observer.stop()
+    observer.join()
+    
+    # Print final statistics
+    stats = event_handler.get_stats()
+    print(f"\n✓ Watch mode stopped", file=sys.stderr)
+    print(f"  Final stats: {stats['processed']} processed, {stats['cached']} cached, {stats['errors']} errors", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Extract text from Excalidraw drawings using AI OCR (OpenAI/OpenRouter)",
@@ -420,6 +743,8 @@ Examples:
   %(prog)s drawing.excalidraw.md -c                 # Also copy to clipboard
   %(prog)s drawing.excalidraw.md -f                 # Force reprocessing
   %(prog)s ./drawings/                              # Process all .excalidraw.md files in folder
+  %(prog)s ./drawings/ -w                           # Watch folder for changes
+  %(prog)s ./drawings/ -w --force                   # Watch and always reprocess
 
 Note: Output is automatically saved to a file with the same name but without
       the .excalidraw part (e.g., "name.excalidraw.md" -> "name.md").
@@ -430,6 +755,9 @@ Note: Output is automatically saved to a file with the same name but without
       
       Batch Processing: When given a folder path, processes all .excalidraw.md
       files in that folder. Shows summary at the end.
+      
+      Watch Mode: Use --watch to continuously monitor a folder for new or changed
+      .excalidraw.md files. Automatically processes them as they're created or modified.
 
 Environment Variables:
   OPENAI_API_KEY        Your OpenAI API key (preferred if set)
@@ -472,6 +800,11 @@ Requirements:
         action="store_true",
         help="Force reprocessing even if output is up-to-date",
     )
+    parser.add_argument(
+        "-w", "--watch",
+        action="store_true",
+        help="Watch folder for changes and process files automatically",
+    )
     
     args = parser.parse_args()
     
@@ -486,6 +819,28 @@ Requirements:
     
     try:
         input_path = Path(args.excalidraw_file).resolve()
+        
+        # Watch mode
+        if args.watch:
+            if not input_path.is_dir():
+                print("Error: --watch requires a folder path, not a file", file=sys.stderr)
+                return 1
+            
+            if args.output:
+                print("Error: Cannot specify --output in watch mode", file=sys.stderr)
+                return 1
+            
+            if args.clipboard:
+                print("Error: Cannot use --clipboard in watch mode", file=sys.stderr)
+                return 1
+            
+            try:
+                watch_folder(input_path, model=args.model, force=args.force)
+                return 0
+            except ImportError as e:
+                logger.error(f"Watch mode not available: {e}")
+                print(f"Error: {e}", file=sys.stderr)
+                return 1
         
         # Determine if input is a file or folder
         if input_path.is_file():
