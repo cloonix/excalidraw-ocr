@@ -1,4 +1,22 @@
-# AI Agent Instructions for OCR Project
+# AI Agent Guidelines for OCR Project
+
+## Build/Test Commands
+- **Install Python deps**: `pip install -r requirements.txt`
+- **Install Node deps**: `npm install`
+- **Run general OCR**: `python ocr.py <image_file> [-o output.txt] [-m model]`
+- **Run Excalidraw OCR**: `python excalidraw_ocr.py <file_or_folder> [-o output.txt] [-f]`
+- **Docker build**: `make build` or `docker compose build`
+- **Docker test**: `make test` (verifies Python, Node.js, cairosvg, lz-string)
+- **No formal test suite**: Test manually with real images/Excalidraw files
+
+## Code Style
+- **Type hints**: Required for all function signatures (use `Path`, `str | None`, etc.)
+- **Docstrings**: Required for all public functions (include Args, Returns, Raises sections)
+- **Imports**: Standard library → third-party → local (grouped, alphabetical within groups)
+- **Naming**: `snake_case` functions/variables, `UPPER_CASE` constants, descriptive names
+- **Error handling**: Raise specific exceptions (FileNotFoundError, ValueError), log with `logger`
+- **Security**: Always use `validate_output_path()` for file paths, validate sizes/dimensions
+- **Thread safety**: Use `_config_lock` when modifying global API configuration
 
 ## Issue Tracking with bd (beads)
 
@@ -68,31 +86,6 @@ bd automatically syncs with git:
 - Imports from JSONL when newer (e.g., after `git pull`)
 - No manual export/import needed!
 
-### GitHub Copilot Integration
-
-If using GitHub Copilot, also create `.github/copilot-instructions.md` for automatic instruction loading.
-Run `bd onboard` to get the content, or see step 2 of the onboard instructions.
-
-### MCP Server (Recommended)
-
-If using Claude or MCP-compatible clients, install the beads MCP server:
-
-```bash
-pip install beads-mcp
-```
-
-Add to MCP config (e.g., `~/.config/claude/config.json`):
-```json
-{
-  "beads": {
-    "command": "beads-mcp",
-    "args": []
-  }
-}
-```
-
-Then use `mcp__beads__*` functions instead of CLI commands.
-
 ### Managing AI-Generated Planning Documents
 
 AI assistants often create planning and design documents during development:
@@ -114,13 +107,6 @@ AI assistants often create planning and design documents during development:
 history/
 ```
 
-**Benefits:**
-- ✅ Clean repository root
-- ✅ Clear separation between ephemeral and permanent documentation
-- ✅ Easy to exclude from version control if desired
-- ✅ Preserves planning history for archeological research
-- ✅ Reduces noise when browsing the project
-
 ### Important Rules
 
 - ✅ Use bd for ALL task tracking
@@ -128,9 +114,8 @@ history/
 - ✅ Link discovered work with `discovered-from` dependencies
 - ✅ Check `bd ready` before asking "what should I work on?"
 - ✅ Store AI planning docs in `history/` directory
+- ✅ Always commit `.beads/issues.jsonl` with code changes
 - ❌ Do NOT create markdown TODO lists
 - ❌ Do NOT use external issue trackers
 - ❌ Do NOT duplicate tracking systems
 - ❌ Do NOT clutter repo root with planning documents
-
-For more details, see README.md and QUICKSTART.md.
