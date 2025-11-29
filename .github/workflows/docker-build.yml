@@ -36,17 +36,13 @@ jobs:
         run: |
           docker run --rm excalidraw-ocr:test python --version
       
-      - name: Test Node.js installation
-        run: |
-          docker run --rm excalidraw-ocr:test node --version
-      
       - name: Test cairosvg import
         run: |
           docker run --rm excalidraw-ocr:test python -c "import cairosvg; print('✓ cairosvg OK')"
       
-      - name: Test lz-string
+      - name: Test lzstring import
         run: |
-          docker run --rm excalidraw-ocr:test node -e "const lz = require('lz-string'); console.log('✓ lz-string OK')"
+          docker run --rm excalidraw-ocr:test python -c "import lzstring; print('✓ lzstring OK')"
       
       - name: Test OCR help command
         run: |
