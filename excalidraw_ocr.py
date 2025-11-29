@@ -51,6 +51,15 @@ WATCH_MAX_DEBOUNCE_ENTRIES = 1000  # Maximum debounce entries before cleanup
 WATCH_EXTENSIONS = {'.excalidraw.md', '.excalidraw'}  # File extensions to watch
 WATCH_IGNORE_PATTERNS = {'.swp', '~', '.tmp', '.bak'}  # Temp file patterns to ignore
 
+# Stabilization delay: wait for file to stop changing before processing
+# This prevents processing files that are being actively edited (e.g., during meetings)
+try:
+    WATCH_STABILIZATION_DELAY_MINUTES = int(os.environ.get('STABILIZATION_DELAY_MINUTES', '15'))
+except ValueError:
+    logger.warning("Invalid STABILIZATION_DELAY_MINUTES, using default 15")
+    WATCH_STABILIZATION_DELAY_MINUTES = 15
+WATCH_STABILIZATION_CHECK_INTERVAL = 10  # Check for ready files every N seconds
+
 # Try to import cairosvg
 try:
     import cairosvg
@@ -611,6 +620,78 @@ def process_excalidraw_file(
         return extracted_text, True, content_hash
 
 
+class PendingFileTracker:
+    """
+    Tracks files pending processing with stabilization delay.
+    
+    When a file is created or modified, it's added to the pending queue with a
+    "process after" timestamp. If the file is modified again before that time,
+    the timer resets. This ensures files that are being actively edited (e.g.,
+    during a meeting) aren't processed until editing has stopped.
+    
+    Args:
+        delay_seconds: How long to wait after last modification before processing
+        
+    Attributes:
+        pending: Dict mapping file paths to their "process after" timestamps
+    """
+    
+    def __init__(self, delay_seconds: float) -> None:
+        self.delay = delay_seconds
+        self.pending: dict[str, float] = {}  # path -> process_after_timestamp
+        self.lock = threading.Lock()
+    
+    def touch(self, path: str) -> None:
+        """
+        Register or reset timer for a file.
+        
+        Args:
+            path: Path to the file that was created/modified
+        """
+        process_after = time.time() + self.delay
+        with self.lock:
+            was_pending = path in self.pending
+            self.pending[path] = process_after
+        
+        # Log the action
+        delay_mins = self.delay / 60
+        if was_pending:
+            logger.info(f"Timer reset for {Path(path).name}, will process in {delay_mins:.0f} min")
+        else:
+            logger.info(f"Queued {Path(path).name}, will process in {delay_mins:.0f} min")
+    
+    def get_ready_files(self) -> list[str]:
+        """
+        Return files whose delay has expired and remove them from pending.
+        
+        Returns:
+            List of file paths ready for processing
+        """
+        now = time.time()
+        with self.lock:
+            ready = [p for p, t in self.pending.items() if now >= t]
+            for p in ready:
+                del self.pending[p]
+            return ready
+    
+    def remove(self, path: str) -> None:
+        """
+        Remove a file from tracking (e.g., if deleted).
+        
+        Args:
+            path: Path to remove from pending queue
+        """
+        with self.lock:
+            if path in self.pending:
+                del self.pending[path]
+                logger.info(f"Removed {Path(path).name} from pending queue")
+    
+    def get_pending_count(self) -> int:
+        """Return the number of files currently pending."""
+        with self.lock:
+            return len(self.pending)
+
+
 class ExcalidrawWatcher(FileSystemEventHandler):
     """
     File system event handler for Excalidraw files.
@@ -621,6 +702,7 @@ class ExcalidrawWatcher(FileSystemEventHandler):
     Args:
         model: OCR model to use (optional)
         force: Force reprocessing even if cached
+        pending_tracker: Optional PendingFileTracker for stabilization delay
         
     Attributes:
         processed_count: Number of files processed
@@ -628,10 +710,16 @@ class ExcalidrawWatcher(FileSystemEventHandler):
         error_count: Number of processing errors
     """
     
-    def __init__(self, model: str | None = None, force: bool = False) -> None:
+    def __init__(
+        self,
+        model: str | None = None,
+        force: bool = False,
+        pending_tracker: PendingFileTracker | None = None
+    ) -> None:
         super().__init__()
         self.model = model
         self.force = force
+        self.pending_tracker = pending_tracker
         
         # Thread-safe state
         self.last_processed: dict[str, float] = {}
@@ -794,11 +882,21 @@ class ExcalidrawWatcher(FileSystemEventHandler):
         for attempt in range(3):
             time.sleep(0.1 * (attempt + 1))  # 0.1s, 0.2s, 0.3s
             if self.check_file_stable(path):
-                self.process_file(path)
-                return
+                break
+        else:
+            # If still unstable after retries, log warning
+            logger.warning(f"File unstable after retries: {path.name}")
+            return
         
-        # If still unstable after retries, log warning
-        logger.warning(f"File unstable after retries: {path.name}")
+        # If we have a pending tracker, queue the file; otherwise process immediately
+        if self.pending_tracker:
+            self.pending_tracker.touch(path_str)
+            timestamp = time.strftime("%H:%M:%S")
+            delay_mins = self.pending_tracker.delay / 60
+            print(f"[{timestamp}] Queued: {path.name} (will process in {delay_mins:.0f} min if unchanged)", 
+                  file=sys.stderr)
+        else:
+            self.process_file(path)
     
     def on_modified(self, event: FileSystemEvent) -> None:
         """Handle file modification events."""
@@ -818,7 +916,26 @@ class ExcalidrawWatcher(FileSystemEventHandler):
             logger.warning(f"File unstable, skipping: {path.name}")
             return
         
-        self.process_file(path)
+        # If we have a pending tracker, queue the file; otherwise process immediately
+        if self.pending_tracker:
+            self.pending_tracker.touch(path_str)
+            timestamp = time.strftime("%H:%M:%S")
+            delay_mins = self.pending_tracker.delay / 60
+            print(f"[{timestamp}] Queued: {path.name} (will process in {delay_mins:.0f} min if unchanged)", 
+                  file=sys.stderr)
+        else:
+            self.process_file(path)
+    
+    def on_deleted(self, event: FileSystemEvent) -> None:
+        """Handle file deletion events."""
+        if event.is_directory:
+            return
+        
+        path_str = event.src_path
+        
+        # Remove from pending tracker if present
+        if self.pending_tracker:
+            self.pending_tracker.remove(path_str)
     
     def get_stats(self) -> dict[str, int]:
         """Get processing statistics."""
@@ -832,7 +949,8 @@ class ExcalidrawWatcher(FileSystemEventHandler):
 def watch_folder(
     folder_path: Path,
     model: str | None = None,
-    force: bool = False
+    force: bool = False,
+    delay_minutes: int | None = None
 ) -> None:
     """
     Watch a folder for Excalidraw file changes and process them automatically.
@@ -841,6 +959,8 @@ def watch_folder(
         folder_path: Path to folder to watch
         model: OCR model to use (optional)
         force: Force reprocessing even if cached
+        delay_minutes: Minutes to wait after last modification before processing.
+                      None means use default from env/config. 0 means no delay.
         
     Raises:
         ImportError: If watchdog library is not installed
@@ -851,9 +971,22 @@ def watch_folder(
             "Install it with: pip install watchdog"
         )
     
+    # Determine stabilization delay
+    if delay_minutes is None:
+        delay_minutes = WATCH_STABILIZATION_DELAY_MINUTES
+    
+    # Create pending file tracker (None if no delay)
+    pending_tracker: PendingFileTracker | None = None
+    if delay_minutes > 0:
+        delay_seconds = delay_minutes * 60
+        pending_tracker = PendingFileTracker(delay_seconds)
+        print(f"Stabilization delay: {delay_minutes} minutes", file=sys.stderr)
+    else:
+        print("Stabilization delay: disabled (immediate processing)", file=sys.stderr)
+    
     print(f"Initializing watch mode for: {folder_path}", file=sys.stderr)
     
-    # Initial scan: process all existing files
+    # Initial scan: process all existing files immediately (no delay)
     existing_files = sorted(folder_path.glob("*.excalidraw.md"))
     if existing_files:
         print(f"Processing {len(existing_files)} existing file(s)...\n", file=sys.stderr)
@@ -874,7 +1007,7 @@ def watch_folder(
                 
                 if was_processed:
                     save_with_metadata(output_file, extracted_text, content_hash, str(file_path))
-                    print(f"✓ {file_path.name} → {output_file.name}", file=sys.stderr)
+                    print(f"✓ {file_path.name} -> {output_file.name}", file=sys.stderr)
                     processed += 1
                 else:
                     print(f"✓ {file_path.name} (cached)", file=sys.stderr)
@@ -888,12 +1021,16 @@ def watch_folder(
         print(f"\nInitial scan complete: {processed} processed, {cached} cached, {errors} errors", file=sys.stderr)
     
     # Set up file system observer
-    event_handler = ExcalidrawWatcher(model=model, force=force)
+    event_handler = ExcalidrawWatcher(model=model, force=force, pending_tracker=pending_tracker)
     observer = Observer()
     observer.schedule(event_handler, str(folder_path), recursive=False)
     observer.start()
     
-    print(f"\n👀 Watching {folder_path} for changes... (Ctrl+C to stop)\n", file=sys.stderr)
+    if delay_minutes > 0:
+        print(f"\nWatching {folder_path} for changes... (Ctrl+C to stop)", file=sys.stderr)
+        print(f"Files will be processed {delay_minutes} min after last modification\n", file=sys.stderr)
+    else:
+        print(f"\nWatching {folder_path} for changes... (Ctrl+C to stop)\n", file=sys.stderr)
     
     # Set up signal handlers for graceful shutdown
     shutdown_event = threading.Event()
@@ -906,8 +1043,27 @@ def watch_folder(
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
+        # Main loop: check for ready files and process them
         while not shutdown_event.is_set():
-            time.sleep(1)
+            # Check for files ready to process
+            if pending_tracker:
+                ready_files = pending_tracker.get_ready_files()
+                for file_path_str in ready_files:
+                    file_path = Path(file_path_str)
+                    if file_path.exists():
+                        event_handler.process_file(file_path)
+                    else:
+                        logger.warning(f"Ready file no longer exists: {file_path}")
+            
+            # Sleep for the check interval (shorter if using tracker)
+            sleep_time = WATCH_STABILIZATION_CHECK_INTERVAL if pending_tracker else 1
+            
+            # Use shorter sleeps to allow responsive shutdown
+            for _ in range(int(sleep_time)):
+                if shutdown_event.is_set():
+                    break
+                time.sleep(1)
+                
     except KeyboardInterrupt:
         pass
     
@@ -917,8 +1073,11 @@ def watch_folder(
     
     # Print final statistics
     stats = event_handler.get_stats()
+    pending_count = pending_tracker.get_pending_count() if pending_tracker else 0
     print(f"\n✓ Watch mode stopped", file=sys.stderr)
     print(f"  Final stats: {stats['processed']} processed, {stats['cached']} cached, {stats['errors']} errors", file=sys.stderr)
+    if pending_count > 0:
+        print(f"  Note: {pending_count} file(s) were still pending (not processed)", file=sys.stderr)
 
 
 def main():
@@ -936,6 +1095,8 @@ Examples:
   %(prog)s ./drawings/                              # Process all .excalidraw.md files in folder
   %(prog)s ./drawings/ -w                           # Watch folder for changes
   %(prog)s ./drawings/ -w --force                   # Watch and always reprocess
+  %(prog)s ./drawings/ -w --delay 30                # Wait 30 min before processing
+  %(prog)s ./drawings/ -w --no-delay                # Process immediately (no wait)
 
 Note: Output is automatically saved to a file with the same name but without
       the .excalidraw part (e.g., "name.excalidraw.md" -> "name.md").
@@ -948,13 +1109,16 @@ Note: Output is automatically saved to a file with the same name but without
       files in that folder. Shows summary at the end.
       
       Watch Mode: Use --watch to continuously monitor a folder for new or changed
-      .excalidraw.md files. Automatically processes them as they're created or modified.
+      .excalidraw.md files. By default, waits 15 minutes after the last modification
+      before processing (stabilization delay). This prevents processing files that
+      are being actively edited, e.g., during a meeting. Use --no-delay to disable.
 
 Environment Variables:
-  OPENAI_API_KEY        Your OpenAI API key (preferred if set)
-  OPENAI_MODEL          OpenAI model to use (default: gpt-4o)
-  OPENROUTER_API_KEY    Your OpenRouter API key (fallback)
-  OPENROUTER_MODEL      OpenRouter model to use (default: google/gemini-flash-1.5)
+  OPENAI_API_KEY              Your OpenAI API key (preferred if set)
+  OPENAI_MODEL                OpenAI model to use (default: gpt-4o)
+  OPENROUTER_API_KEY          Your OpenRouter API key (fallback)
+  OPENROUTER_MODEL            OpenRouter model to use (default: google/gemini-flash-1.5)
+  STABILIZATION_DELAY_MINUTES Minutes to wait before processing (default: 15)
 
 Requirements:
   - Node.js and npm (for Excalidraw rendering)
@@ -996,6 +1160,18 @@ Requirements:
         action="store_true",
         help="Watch folder for changes and process files automatically",
     )
+    parser.add_argument(
+        "--delay",
+        type=int,
+        metavar="MINUTES",
+        default=None,
+        help=f"Minutes to wait after last file modification before processing (default: {WATCH_STABILIZATION_DELAY_MINUTES})",
+    )
+    parser.add_argument(
+        "--no-delay",
+        action="store_true",
+        help="Disable stabilization delay, process files immediately (for testing)",
+    )
     
     args = parser.parse_args()
     
@@ -1025,8 +1201,14 @@ Requirements:
                 print("Error: Cannot use --clipboard in watch mode", file=sys.stderr)
                 return 1
             
+            # Determine delay: --no-delay sets to 0, --delay overrides default
+            if args.no_delay:
+                delay_minutes = 0
+            else:
+                delay_minutes = args.delay  # None means use default
+            
             try:
-                watch_folder(input_path, model=args.model, force=args.force)
+                watch_folder(input_path, model=args.model, force=args.force, delay_minutes=delay_minutes)
                 return 0
             except ImportError as e:
                 logger.error(f"Watch mode not available: {e}")

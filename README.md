@@ -131,9 +131,13 @@ python ocr.py --list-models                       # Show available models
 python excalidraw_ocr.py drawing.excalidraw.md    # Basic usage (auto-saves as drawing.md)
 python excalidraw_ocr.py drawing.excalidraw.md -o output.txt  # Custom output
 python excalidraw_ocr.py drawing.excalidraw.md -c # Copy to clipboard
-python excalidraw_ocr.py folder/ -w               # Watch mode
+python excalidraw_ocr.py folder/ -w               # Watch mode (15 min delay by default)
+python excalidraw_ocr.py folder/ -w --no-delay    # Watch mode (immediate processing)
+python excalidraw_ocr.py folder/ -w --delay 30    # Watch mode (30 min delay)
 python excalidraw_ocr.py drawing.excalidraw.md -f # Force reprocess (ignore cache)
 ```
+
+**Watch mode stabilization delay:** By default, watch mode waits 15 minutes after the last file modification before processing. This prevents processing files that are being actively edited (e.g., during meetings). Use `--no-delay` for immediate processing or `--delay MINUTES` to customize.
 
 ## Recommended Models
 
