@@ -88,30 +88,26 @@ OPENROUTER_API_KEY=your_key_here
 OPENROUTER_MODEL=google/gemini-flash-1.5
 ```
 
-## Docker Compose
+## Docker Compose (Watch Mode)
 
-Build and run locally:
+The `docker-compose.yml` is configured for watch mode - continuously monitoring a folder for new Excalidraw files:
 
 ```bash
 # Setup
-make setup  # Creates directories and .env file
-make build  # Build Docker image
+make setup        # Creates directories and .env file
 
-# Run
-make ocr IMAGE=/data/image.png
-make excalidraw FILE=/data/drawing.excalidraw.md
+# Start watch mode
+docker compose up -d
+docker compose logs -f   # View logs
+docker compose down      # Stop
+
+# Or use make targets
 make watch-start  # Start watch mode
 make watch-logs   # View logs
 make watch-stop   # Stop watch mode
 ```
 
-Or use `docker-compose.yml` directly:
-
-```bash
-docker compose run --rm ocr python ocr.py /data/image.png
-docker compose run --rm excalidraw python excalidraw_ocr.py /data/drawing.excalidraw.md
-docker compose up -d watch
-```
+For one-shot processing, use `docker run` directly (see Quick Start above).
 
 ## Command Line Options
 

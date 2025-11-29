@@ -1,7 +1,6 @@
-.PHONY: build run shell test clean help logs ocr excalidraw stop watch-build watch-start watch-stop watch-restart watch-logs watch-status watch-clean watch-shell
+.PHONY: build shell test clean help logs ocr excalidraw stop watch-build watch-start watch-stop watch-restart watch-logs watch-status watch-clean watch-shell
 
-IMAGE_NAME := excalidraw-ocr
-CONTAINER_NAME := ocr-container
+IMAGE_NAME := ghcr.io/cloonix/excalidraw-ocr:latest
 
 # Docker Compose command (auto-detect v1 or v2)
 DOCKER_COMPOSE := $(shell command -v docker-compose 2>/dev/null && echo docker-compose || echo "docker compose")
@@ -19,13 +18,12 @@ help:
 	@echo "  make build        - Build Docker image"
 	@echo "  make setup        - Create input/output directories and copy .env.example"
 	@echo ""
-	@echo "$(GREEN)Running:$(NC)"
-	@echo "  make run          - Run with $(DOCKER_COMPOSE) (shows help)"
+	@echo "$(GREEN)One-shot Processing:$(NC)"
 	@echo "  make shell        - Open interactive shell in container"
-	@echo "  make ocr          - Run OCR on image (IMAGE=/input/file.png)"
-	@echo "  make excalidraw   - Run Excalidraw OCR (FILE=/input/drawing.excalidraw.md)"
+	@echo "  make ocr          - Run OCR on image (IMAGE=data/file.png)"
+	@echo "  make excalidraw   - Run Excalidraw OCR (FILE=data/drawing.excalidraw.md)"
 	@echo ""
-	@echo "$(GREEN)Watch Mode:$(NC)"
+	@echo "$(GREEN)Watch Mode (docker compose):$(NC)"
 	@echo "  make watch-build  - Build watch mode container"
 	@echo "  make watch-start  - Start watch mode in background"
 	@echo "  make watch-stop   - Stop watch mode"
@@ -46,13 +44,13 @@ help:
 	@echo "  make clean-all    - Remove containers, volumes, and images"
 	@echo ""
 	@echo "$(YELLOW)Examples:$(NC)"
-	@echo "  make ocr IMAGE=/data/handwriting.jpg"
-	@echo "  make excalidraw FILE=/data/drawing.excalidraw.md"
+	@echo "  make ocr IMAGE=data/handwriting.jpg"
+	@echo "  make excalidraw FILE=data/drawing.excalidraw.md"
 	@echo "  make watch-start  # Monitors ./watch folder continuously"
 
 build:
 	@echo "$(GREEN)Building Docker image...$(NC)"
-	$(DOCKER_COMPOSE) build
+	$(DOCKER_COMPOSE) build watch
 	@echo "$(GREEN)✓ Build complete$(NC)"
 
 setup:
@@ -73,47 +71,43 @@ setup:
 	@echo "  3. Place images in ./data/"
 	@echo "  4. Run 'make ocr IMAGE=/data/yourimage.png'"
 
-run:
-	@echo "$(GREEN)Starting OCR container...$(NC)"
-	$(DOCKER_COMPOSE) up
-
 shell:
 	@echo "$(GREEN)Opening shell in container...$(NC)"
-	$(DOCKER_COMPOSE) run --rm ocr /bin/bash
+	docker run --rm -it -v ./data:/data --env-file .env $(IMAGE_NAME) /bin/bash
 
 test:
 	@echo "$(GREEN)Testing Docker setup...$(NC)"
 	@echo "\n$(BLUE)Python version:$(NC)"
-	$(DOCKER_COMPOSE) run --rm ocr python --version
+	@docker run --rm $(IMAGE_NAME) python --version
 	@echo "\n$(BLUE)Node.js version:$(NC)"
-	$(DOCKER_COMPOSE) run --rm ocr node --version
+	@docker run --rm $(IMAGE_NAME) node --version
 	@echo "\n$(BLUE)Testing cairosvg import:$(NC)"
-	$(DOCKER_COMPOSE) run --rm ocr python -c "import cairosvg; print('✓ cairosvg OK')"
+	@docker run --rm $(IMAGE_NAME) python -c "import cairosvg; print('✓ cairosvg OK')"
 	@echo "\n$(BLUE)Testing lz-string:$(NC)"
-	$(DOCKER_COMPOSE) run --rm ocr node -e "const lz = require('lz-string'); console.log('✓ lz-string OK')"
+	@docker run --rm $(IMAGE_NAME) node -e "const lz = require('lz-string'); console.log('✓ lz-string OK')"
 	@echo "\n$(GREEN)✓ All tests passed$(NC)"
 
 list-models:
 	@echo "$(GREEN)Listing available OCR models...$(NC)"
-	$(DOCKER_COMPOSE) run --rm ocr python ocr.py --list-models
+	@docker run --rm --env-file .env $(IMAGE_NAME) python ocr.py --list-models
 
 ocr:
 	@if [ -z "$(IMAGE)" ]; then \
-		echo "$(YELLOW)Usage: make ocr IMAGE=/data/yourimage.png [OUTPUT=/data/result.txt]$(NC)"; \
+		echo "$(YELLOW)Usage: make ocr IMAGE=data/yourimage.png [OUTPUT=data/result.txt]$(NC)"; \
 		exit 1; \
 	fi
 	@if [ -n "$(OUTPUT)" ]; then \
-		$(DOCKER_COMPOSE) run --rm ocr python ocr.py $(IMAGE) -o $(OUTPUT); \
+		docker run --rm -v ./data:/data --env-file .env $(IMAGE_NAME) python ocr.py /$(IMAGE) -o /$(OUTPUT); \
 	else \
-		$(DOCKER_COMPOSE) run --rm ocr python ocr.py $(IMAGE); \
+		docker run --rm -v ./data:/data --env-file .env $(IMAGE_NAME) python ocr.py /$(IMAGE); \
 	fi
 
 excalidraw:
 	@if [ -z "$(FILE)" ]; then \
-		echo "$(YELLOW)Usage: make excalidraw FILE=/data/drawing.excalidraw.md$(NC)"; \
+		echo "$(YELLOW)Usage: make excalidraw FILE=data/drawing.excalidraw.md$(NC)"; \
 		exit 1; \
 	fi
-	$(DOCKER_COMPOSE) run --rm excalidraw python excalidraw_ocr.py $(FILE)
+	@docker run --rm -v ./data:/data --env-file .env $(IMAGE_NAME) python excalidraw_ocr.py /$(FILE)
 
 logs:
 	@echo "$(GREEN)Showing container logs...$(NC)"
@@ -131,13 +125,13 @@ clean:
 
 clean-all: clean
 	@echo "$(YELLOW)Removing Docker images...$(NC)"
-	docker rmi $(IMAGE_NAME):latest 2>/dev/null || true
+	docker rmi $(IMAGE_NAME) 2>/dev/null || true
 	@echo "$(GREEN)✓ All cleaned$(NC)"
 
 # Development helpers
 dev-build:
 	@echo "$(GREEN)Building without cache...$(NC)"
-	$(DOCKER_COMPOSE) build --no-cache
+	$(DOCKER_COMPOSE) build --no-cache watch
 
 dev-logs:
 	@echo "$(GREEN)Showing detailed logs...$(NC)"
@@ -149,16 +143,16 @@ batch-ocr:
 	@for img in data/*.{png,jpg,jpeg,PNG,JPG,JPEG}; do \
 		if [ -f "$$img" ]; then \
 			echo "Processing $$img..."; \
-			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/data/$$(basename $$img .png).txt" 2>/dev/null || \
-			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/data/$$(basename $$img .jpg).txt" 2>/dev/null || \
-			$(DOCKER_COMPOSE) run --rm ocr python ocr.py "/$$img" -o "/data/$$(basename $$img .jpeg).txt" 2>/dev/null; \
+			docker run --rm -v ./data:/data --env-file .env $(IMAGE_NAME) python ocr.py "/$$img" -o "/data/$$(basename $$img .png).txt" 2>/dev/null || \
+			docker run --rm -v ./data:/data --env-file .env $(IMAGE_NAME) python ocr.py "/$$img" -o "/data/$$(basename $$img .jpg).txt" 2>/dev/null || \
+			docker run --rm -v ./data:/data --env-file .env $(IMAGE_NAME) python ocr.py "/$$img" -o "/data/$$(basename $$img .jpeg).txt" 2>/dev/null; \
 		fi; \
 	done
 	@echo "$(GREEN)✓ Batch processing complete$(NC)"
 
 batch-excalidraw:
 	@echo "$(GREEN)Batch processing all Excalidraw files in ./data/...$(NC)"
-	$(DOCKER_COMPOSE) run --rm excalidraw python excalidraw_ocr.py /data/
+	@docker run --rm -v ./data:/data --env-file .env $(IMAGE_NAME) python excalidraw_ocr.py /data/
 	@echo "$(GREEN)✓ Batch processing complete$(NC)"
 
 # Watch mode targets
@@ -198,8 +192,7 @@ watch-status:
 
 watch-clean:
 	@echo "$(YELLOW)Removing watch mode container and volumes...$(NC)"
-	$(DOCKER_COMPOSE) down watch
-	$(DOCKER_COMPOSE) volume rm ocr_watch-logs 2>/dev/null || true
+	$(DOCKER_COMPOSE) down -v
 	@echo "$(GREEN)✓ Cleaned$(NC)"
 
 watch-shell:

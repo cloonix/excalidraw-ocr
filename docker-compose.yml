@@ -1,91 +1,9 @@
 services:
-  # One-shot OCR service (general images)
-  # Usage: docker compose run --rm ocr python ocr.py /data/image.png -o /data/text.txt
-  ocr:
+  # Watch mode service - automatically process new Excalidraw files
+  # Usage: docker compose up -d
+  excalidraw-ocr:
     image: ghcr.io/cloonix/excalidraw-ocr:latest
-    container_name: ocr-container
-
-    # Mount volumes for input/output
-    volumes:
-      - ./data:/data
-      - ./.env:/app/.env:ro
-      - ocr-logs:/home/ocruser/.ocr/logs
-
-    env_file:
-      - .env
-    environment:
-      - DEBUG=${DEBUG:-}
-
-    security_opt:
-      - no-new-privileges:true
-    read_only: false
-    tmpfs:
-      - /tmp:size=1G,mode=1777
-
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2G
-        reservations:
-          cpus: "0.5"
-          memory: 512M
-
-    user: "1000:1000"
-    network_mode: bridge
-    restart: "no"
-
-    command: ["python", "ocr.py", "--help"]
-
-    stdin_open: true
-    tty: true
-
-  # Excalidraw one-shot service
-  # Usage: docker compose run --rm excalidraw python excalidraw_ocr.py /data/drawing.excalidraw.md
-  excalidraw:
-    image: ghcr.io/cloonix/excalidraw-ocr:latest
-    container_name: excalidraw-oneshot
-
-    volumes:
-      - ./data:/data
-      - ./.env:/app/.env:ro
-      - ocr-logs:/home/ocruser/.ocr/logs
-
-    env_file:
-      - .env
-    environment:
-      - PYTHONUNBUFFERED=1
-      - DEBUG=${DEBUG:-}
-
-    security_opt:
-      - no-new-privileges:true
-    read_only: false
-    tmpfs:
-      - /tmp:size=1G,mode=1777
-
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2G
-        reservations:
-          cpus: "0.5"
-          memory: 512M
-
-    user: "1000:1000"
-    network_mode: bridge
-    restart: "no"
-
-    command: ["python", "excalidraw_ocr.py", "--help"]
-
-    stdin_open: true
-    tty: true
-
-  # Watch mode service (continuous monitoring)
-  # Usage: docker compose up -d watch
-  watch:
-    image: ghcr.io/cloonix/excalidraw-ocr:latest
-    container_name: excalidraw-watch
+    container_name: excalidraw-ocr
 
     command: ["python", "excalidraw_ocr.py", "/watch", "-w"]
 
@@ -110,13 +28,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4"
-          memory: 3G
+          cpus: "2"
+          memory: 512M
         reservations:
           cpus: "1"
-          memory: 1G
+          memory: 256M
       restart_policy:
-        condition: on-failure
+        condition: unless-stopped
         delay: 5s
         max_attempts: 3
         window: 120s
@@ -144,7 +62,5 @@ services:
       start_period: 30s
 
 volumes:
-  ocr-logs:
-    driver: local
   watch-logs:
     driver: local
