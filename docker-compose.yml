@@ -1,41 +1,27 @@
-version: "3.8"
-
 services:
   # One-shot OCR service (general images)
   # Usage: docker compose run --rm ocr python ocr.py /data/image.png -o /data/text.txt
   ocr:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: excalidraw-ocr:latest
+    image: ghcr.io/cloonix/excalidraw-ocr:latest
     container_name: ocr-container
 
     # Mount volumes for input/output
     volumes:
-      # Mount data directory (read-write for input and output)
       - ./data:/data
-      # Mount .env file securely (read-only)
       - ./.env:/app/.env:ro
-      # Persist logs
       - ocr-logs:/home/ocruser/.ocr/logs
 
-    # Set environment variables
     env_file:
       - .env
     environment:
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-flash-1.5}
       - DEBUG=${DEBUG:-}
 
-    # Security settings
     security_opt:
       - no-new-privileges:true
-    read_only: false # Need write access for temp files
+    read_only: false
     tmpfs:
-      # Temporary filesystem for secure temp file handling
       - /tmp:size=1G,mode=1777
 
-    # Resource limits
     deploy:
       resources:
         limits:
@@ -45,30 +31,19 @@ services:
           cpus: "0.5"
           memory: 512M
 
-    # User (non-root)
     user: "1000:1000"
-
-    # Network mode (no exposed ports needed)
     network_mode: bridge
-
-    # Restart policy
     restart: "no"
 
-    # Command (can be overridden)
-    # Default: show help message
     command: ["python", "ocr.py", "--help"]
 
-    # Enable stdin/tty for interactive use
     stdin_open: true
     tty: true
 
   # Excalidraw one-shot service
   # Usage: docker compose run --rm excalidraw python excalidraw_ocr.py /data/drawing.excalidraw.md
   excalidraw:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: excalidraw-ocr:latest
+    image: ghcr.io/cloonix/excalidraw-ocr:latest
     container_name: excalidraw-oneshot
 
     volumes:
@@ -109,40 +84,29 @@ services:
   # Watch mode service (continuous monitoring)
   # Usage: docker compose up -d watch
   watch:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: excalidraw-ocr:latest
+    image: ghcr.io/cloonix/excalidraw-ocr:latest
     container_name: excalidraw-watch
 
-    # Watch mode command
     command: ["python", "excalidraw_ocr.py", "/watch", "-w"]
 
-    # Volumes
     volumes:
-      # Watch directory (read-write for outputs)
       - ./watch:/watch
-      # Environment file (read-only)
       - ./.env:/app/.env:ro
-      # Persistent logs
       - watch-logs:/home/ocruser/.ocr/logs
 
-    # Environment variables
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
       - DEBUG=${DEBUG:-}
+      - STABILIZATION_DELAY_MINUTES=${STABILIZATION_DELAY_MINUTES:-15}
 
-    # Security settings
     security_opt:
       - no-new-privileges:true
-    read_only: false # Need write for temp files
+    read_only: false
     tmpfs:
-      # Temporary filesystem for secure temp file handling
       - /tmp:size=1G,mode=1777
 
-    # Resource limits (increased for watch mode)
     deploy:
       resources:
         limits:
@@ -157,29 +121,21 @@ services:
         max_attempts: 3
         window: 120s
 
-    # File descriptor limits
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
 
-    # User (non-root)
     user: "1000:1000"
-
-    # Network
     network_mode: bridge
-
-    # Restart policy
     restart: unless-stopped
 
-    # Logging
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
-    # Health check
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'python.*excalidraw_ocr.py.*-w' || exit 1"]
       interval: 60s
